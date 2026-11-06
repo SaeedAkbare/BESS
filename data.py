@@ -49,7 +49,9 @@ def validate_prices(df, start, end):
             "timestamp_utc",
         ]
         # اگر حتی یک ردیف کم یا اضافه باشد، فایل ناقص را قبول نمی‌کنیم.
-        if len(observed) != len(expected) or set(observed) != set(expected):
+        # ساعت تکراری پاییز را برای مقایسه به UTC می‌بریم تا خطای fold پیش نیاید.
+        expected_utc = expected.tz_convert("UTC")
+        if len(observed) != len(expected_utc) or set(observed) != set(expected_utc):
             raise ValueError(
                 f"روز {day.date()} ناقص است: {len(observed)} "
                 f"بازه به جای {len(expected)} بازهٔ ۱۵دقیقه‌ای."
