@@ -1,0 +1,62 @@
+# فقط با داده‌های واقعیِ دانلودشده، اعتبار سناریوهای قیمت اکتبر را می‌سنجیم.
+name: Audit October price scenarios
+
+on:
+  push:
+    paths:
+      - ".github/workflows/audit_risk.yml"
+      - "risk_audit.py"
+      - "test_risk_audit.py"
+  workflow_dispatch:
+
+# فقط اجازهٔ خواندن کد و خروجی تاریخچهٔ قبلی را داریم.
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      # کد پروژه را می‌گیریم.
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # نسخهٔ ثابت پایتون.
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # بسته‌های کم‌تعداد Python را نصب می‌کنیم.
+      - name: Install
+        run: python -m pip install -r requirements.txt
+
+      # تست‌های نرم‌افزاری را قبل از دادهٔ واقعی اجرا می‌کنیم.
+      - name: Run tests
+        run: python -m unittest -v test_data test_scenarios test_risk_audit
+
+      # از ۱۳ ماه قیمت واقعی که قبلاً در Actions تأیید شدند استفاده می‌کنیم.
+      - name: Download historical price CSV
+        uses: actions/download-artifact@v4
+        with:
+          name: DE-LU-validated-months
+          run-id: 42305243042
+          repository: ${{ github.repository }}
+          github-token: ${{ github.token }}
+          path: input/
+
+      # قیمت واقعی اکتبر فقط برای اندازه‌گیری کیفیت ۵۰ سناریو استفاده می‌شود.
+      - name: Evaluate price tails and daily paths
+        run: |
+          python risk_audit.py \
+            --input input/prices_DE-LU_2025-10_to_2026-10.csv \
+            --output output/risk_report.json
+
+      # گزارش JSON قابل بررسی را در خروجی Actions قرار می‌دهیم.
+      - name: Upload risk report
+        uses: actions/upload-artifact@v4
+        with:
+          name: DE-LU-October-risk-audit
+          path: output/risk_report.json
+          if-no-files-found: error
