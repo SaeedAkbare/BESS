@@ -46,6 +46,8 @@ def risk_metrics(actual, paths, historical_low, historical_high):
     # مقایسهٔ فراوانی قیمت منفی و قیمت‌های خارج از ۵/۹۵ تاریخی.
     extreme_rates = {
         "negative_actual": float(np.mean(actual < 0)),
+        # تعداد صریح را هم می‌نویسیم تا گردکردن صفرِ اشتباه نشان ندهد.
+        "negative_actual_count": int(np.sum(actual < 0)),
         "negative_scenarios": float(np.mean(paths < 0)),
         "below_training_p05_actual": float(np.mean(actual < historical_low)),
         "below_training_p05_scenarios": float(np.mean(paths < historical_low)),
@@ -160,9 +162,12 @@ def main():
     print(f"دامنهٔ روزانه واقعی/سناریویی (میانگین EUR/MWh): "
           f"{report['mean_actual_daily_range_eur_mwh']:.1f} / "
           f"{report['mean_scenario_daily_range_eur_mwh']:.1f}")
-    print("قیمت منفی واقعی/سناریویی: "
-          f"{report['extreme_interval_rates']['negative_actual']:.3f} / "
-          f"{report['extreme_interval_rates']['negative_scenarios']:.3f}")
+    print("قیمت‌های منفی واقعی: "
+          f"{report['extreme_interval_rates']['negative_actual_count']} بازه از "
+          f"{report['intervals_evaluated']} بازه")
+    print("سهم قیمت منفی واقعی/سناریویی: "
+          f"{100*report['extreme_interval_rates']['negative_actual']:.3f}% / "
+          f"{100*report['extreme_interval_rates']['negative_scenarios']:.2f}%")
     print(f"گزارش ذخیره شد: {filename}")
     print("هشدار: این بررسی قیمت است؛ کالیبراسیون سودِ منفی یا CVaR باتری نیست.")
 
