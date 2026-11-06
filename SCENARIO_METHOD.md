@@ -1,6 +1,6 @@
-# BESS — approved DE–LU day-ahead research design (v0.3)
+# BESS — approved DE–LU day-ahead research design (v0.4)
 
-**Status (2026-11-06): project design approved; this file contains specifications, NOT executed results.** No verified API download, trained forecast, optimizer run, or measured performance is claimed.
+**Status (2026-11-06): project design approved; industrial-practice audit added; this file contains specifications, NOT executed results.** No verified API download, trained forecast, optimizer run, or measured performance is claimed.
 
 ## Goal and three strategies
 
@@ -159,6 +159,99 @@ Report realized total/mean profit, lower-tail outcomes and CVaR across evaluatio
 ### Pending numerical specification (intentionally not invented)
 
 Before implementing, choose and record `Pmax, Emax, Emin, ηc, ηd, Einit, Efinal, c_c, c_d, α, λ`, and the solver. Until those are confirmed, **no computed dispatch or performance results exist**.
+
+
+## Industrial practice audit — operational and commercial realism (2026-11-06)
+
+**Evidence basis:** NREL/US National Laboratory System Advisor Model (SAM) battery dispatch, cell/system losses and lifecycle documentation; 2025 Annual Technology Baseline (ATB) utility-scale battery assumptions; and published battery dispatch mathematical formulations. These are **public engineering references and not verified confidential settings of any particular German BESS operator**. Confirm actual limits, warranties, costs, and grid contracts from the project's EPC/PCS/BMS and trading arrangements.
+
+### A. State variables: SOC vs SOE — do not conflate without a model definition
+
+- **SOE (state of energy)**: energy stored, `E[t]`, in **MWh**; define energy percentage `SOE_frac[t] = E[t] / E_available[t]`.
+- **SOC (state of charge)**: electrochemical charge-state fraction normally in **%**, tracked by the BMS. It need not be numerically identical to energy fraction when voltage/usable capacity depend on state or temperature.
+- In the **simple linear optimization** we explicitly **approximate SOC and normalized SOE as equal**, using `soc[t] := E[t] / E_available` with constant available capacity for a day. This is a modeling approximation, **not** an electrochemical identity.
+- Define independently: `soc_min`, `soc_max`, `soc_initial`, and `soc_final`. Convert to the E bounds and terminal value with a consistent capacity basis. For example, `Emin=soc_min*E_available`, `Emax=soc_max*E_available`. The hardware's nameplate energy rating and the **usable** energy between SOC limits are different quantities.
+- Preserve `E[t]` across consecutive days in multi-day simulations; do not freely reset SOC each morning. For a **one-day independent benchmark only**, `E[T+1]=E[1]` is a clear, conservative terminal policy; it is not a universally optimal industrial policy. A multi-day rolling horizon can instead use a terminal energy target/value.
+
+### B. Charge/discharge limits and energy balance (essential for v1)
+
+All `ch[t]` and `dis[t]` below are **AC power at the battery power-conversion system (PCS) terminals** (MW). Conversion efficiency `ηc` is AC-to-stored-energy and `ηd` is stored-energy-to-AC, so **do not subtract PCS losses a second time**.
+
+```text
+0 ≤ ch[t]  ≤ available[t] * P_charge_max[t] * u[t]
+0 ≤ dis[t] ≤ available[t] * P_dis_max[t] * (1-u[t])
+u[t] ∈ {0,1}
+E[t+1] = E[t] + Δt*(ηc*ch[t] - dis[t]/ηd)
+Emin[t] ≤ E[t] ≤ Emax_available[t],  and  E[T+1] within terminal policy
+```
+
+- `available[t]` is 0 or 1 for a forced/planned outage, 1 otherwise. For a simple first run, use 1 and clearly state no outages modeled.
+- `P_charge_max[t]` and `P_dis_max[t]` may differ; nameplate **MW** and energy **MWh** are separate. For the simple version treat them constant and no temperature/SOH derating.
+- `Emax_available[t]` can decline with **SOH (state of health)** over longer horizons; for one-day dispatch take it constant if stated.
+- The binary mode `u[t]` enforces mutual exclusivity, particularly important when spot prices can be negative.
+- Enforce grid interconnection (PCC) limits too; a battery rated at 10 MW does not necessarily have a 10 MW import and export connection:
+  
+```text
+q_PCC[t] = dis[t] - ch[t] - P_aux_AC[t]
+-P_grid_import_max ≤ q_PCC[t] ≤ P_grid_export_max
+```
+
+- `P_aux_AC[t]` includes AC-site consumption (cooling, BMS, HVAC and other auxiliary loads) **only if charged at the same modeled market meter**. Its treatment differs for behind-the-meter sites or separate auxiliary supply contracts. If auxiliary losses are **DC-side**, instead subtract the appropriate DC energy from `E[t+1]` and **do not subtract them again at the meter**.
+
+### C. Objective: arbitrage, O&M, and wear (essential distinction)
+
+For v1, use **separate accounting** of (i) energy arbitrage, (ii) *variable* operations & maintenance, (iii) incremental cycle degradation, (iv) auxiliary imports and possible tariffs/fees. A transparent example **conditional on all energy settling at the same spot price**:
+
+```text
+Profit_variable(s)
+  = Σ_t Δt * [
+       price[s,t] * (dis[t]-ch[t]-P_aux_AC[t])
+       - c_vom_ch * ch[t]
+       - c_vom_dis * dis[t]
+       - c_deg_dis * dis[t]
+       - fees_import[t] * max(ch[t]+P_aux_AC[t]-dis[t],0)
+    ]
+```
+
+This example is **not immediately an MILP as written** if `max(·,0)` is implemented naïvely; model a **nonnegative import variable** `import_MW[t]` and enforce its relation to net power, with appropriate energy-settlement rules and import/export exclusivity if needed. For the v1 minimal MILP, set `fees_import=0` until site-specific tariffs are documented; retain linear variable O&M and incremental degradation in the existing `c_c,c_d` factors **without counting the same cost twice**.
+
+- `c_vom_ch,c_vom_dis` (EUR/MWh of AC charging/discharging energy) only when justified by service or maintenance contracts; these coefficients are **not default hard-coded market facts**.
+- `c_deg_dis` (EUR/MWh AC discharged) is a **simple linear wear proxy** calibrated from replacement economics/warranty throughput, **not** an exact physical aging model. More advanced lifecycle models consider depth of discharge, SOC level, calendar aging, temperature, and the manufacturer's throughput/cycle warranty.
+- **Fixed O&M** `FOM` (often EUR/MW/year or fraction of CAPEX per year) is a **constant for an already installed asset** over a single 24-hour dispatch. Therefore `-FOM_daily` changes **reported net financial profit** but **not the profit-maximizing schedule**. If comparing operating strategies, report gross margin, variable net margin, and allocated FOM separately.
+- Likewise **CAPEX and financing** affect investment feasibility/LCOS, not short-horizon marginal dispatch if they are sunk and invariant. **Do not mislabel a throughput depreciation charge as the ATB's fixed O&M**.
+- **Auxiliary consumption** can materially affect margins and net power; if simplified away, disclose `P_aux=0` rather than implying a fully modeled industrial site.
+
+### D. Cycles, warranty, and lifetime
+
+- A transparent energy-throughput proxy for **equivalent full cycles** (EFC) on usable-capacity basis is
+  `EFC ≈ [Σ_t (dis[t]/ηd)*Δt] / (Emax - Emin)`. Here the numerator is internal stored energy withdrawn; the denominator is the usable internal energy span. The definition **depends on the warranty/meter convention**; do not silently equate this to rainflow depth-dependent cycle counting.
+- For a warranty/operations cap, optionally impose `EFC_day ≤ EFC_limit` (or a yearly throughput budget in a longer horizon). Enforce both a degradation *cost* and *limit* only when they reflect distinct economic wear and contractual compliance, not duplicated penalties.
+- Higher-fidelity physics can add `SOH[t]`, cycle/calendar degradation, temperature-dependent available capacity and charge-rate derating (typically requiring calibration and potentially nonlinear/piecewise linear models). NREL SAM treats cycle- and calendar-aging as separate causes of capacity loss.
+
+### E. Operational checks and actual-market caveats
+
+- Validate feasibility, energy conservation, prices including negative values, SOC units, charge/discharge interlock, terminal energy, and rolling day-to-day continuity.
+- Battery management system / manufacturer restrictions can further impose temperature, voltage/current, allowable C-rate, reserve margin, and outage restrictions. Grid connection and power-conversion system ratings can be stricter than battery ratings.
+- **Day-ahead market modeling caveat:** a fixed signed schedule optimized using a single ex-ante price forecast is an **educational price-taker benchmark**, not a complete description of bidding/clearing in a coupled day-ahead auction. An actually executable industrial bidding model needs bid curves, acceptance uncertainty, delivery obligations, imbalance/settlement rules, and compliance with the specific auction's products.
+- Scenario-specific post-clearance physical schedules **without a genuine recourse mechanism and nonanticipativity** create artificial perfect foresight.
+- All three strategies must use identical physical feasible sets and cost accounting; only forecast info/objectives change.
+
+### Recommended scope decision
+
+**Implement in the first small, reviewable codebase**: AC terminal power definitions, charge/discharge MW limits, SOC min/max, initial/terminal SOE, separate ηc/ηd, binary mutual exclusivity, grid import/export limits (even if equal to PCS limits), variable O&M, a justified simple degradation €/MWh discharge proxy, and a report of fixed O&M outside the dispatch objective. Optional AC auxiliary load can be one constant parameter and priced correctly if the settlement meter assumption holds.
+
+**Defer explicitly**: thermal electrochemistry, nonlinear SOH evolution, rainflow-counted aging, detailed component outages, price-dependent auction bids and execution, intraday/balancing-market co-optimization, site-specific grid/tax charges and advanced degradation; add only with sourced site parameters.
+
+**Missing project input—not invented:** PCS MW charge/discharge power, BESS nominal/usable MWh, SOC window and initial/final values, round-trip or separate efficiencies, FOM and VOM basis, degradation/warranty inputs, grid connection import/export MW, auxiliary load and site metering arrangement. Examples from reference models are **not manufacturer's specifications**.
+
+### Source references for this industry-practice audit
+
+1. NREL System Advisor Model, *Front-of-Meter Battery Dispatch*: charge/discharge priority, SOC bounds, grid charging and conversion losses: https://samrepo.nlr.gov/help/battery_dispatch_fom.html
+2. NREL System Advisor Model, *Battery Life*: cycle and calendar degradation, DOD, temperature and replacement: https://samrepo.nlr.gov/help/battery_life.html
+3. NREL SAM, *Battery System Losses*: AC/DC ancillary consumption, mode-dependent loads: https://samrepo.nlr.gov/help/battery_storage_btm.html
+4. NREL/NLR, *2025 Annual Technology Baseline — Utility-Scale Battery Storage*: fixed O&M accounting, BESS cost/performance reference values, representative round-trip efficiency (not site-specific): https://atb.nlr.gov/electricity/2025/utility-scale_battery_storage
+5. NREL, published battery dispatch optimization formulation with operating charge/discharge costs, rated power, SOC and cycle count: https://docs.nrel.gov/docs/fy22osti/82726.pdf
+6. NREL SAM, overall battery dispatch and engineering model scope: https://sam.nrel.gov/battery-storage/
 
 
 ## Evaluation
