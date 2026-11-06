@@ -1,4 +1,4 @@
-# BESS — approved DE–LU day-ahead research design (v0.2)
+# BESS — approved DE–LU day-ahead research design (v0.3)
 
 **Status (2026-11-06): project design approved; this file contains specifications, NOT executed results.** No verified API download, trained forecast, optimizer run, or measured performance is claimed.
 
@@ -35,23 +35,131 @@ Target: ~**50 complete day-ahead price-path scenarios** per delivery day, with i
 
 Keep K-nearest-neighbour historical analogue days as an **optional later forecasting benchmark**, not as a component of the accepted main pipeline. Independent Gaussian noise at every quarter-hour is a poor benchmark because it destroys the path dependence.
 
-## Single battery specification used in all three runs
+## Mathematical optimization problem — explicit three-model formulation
 
-Inputs, to be confirmed: `power_mw`, `energy_mwh`, charge and discharge efficiencies, minimum/maximum SOC, initial SOC, terminal SOC requirement, transaction costs and degradation €/MWh, and optional cycle limits.
+**Scope and decision timing.** This first version studies a *price-taking, pre-auction fixed physical schedule* for the Germany–Luxembourg day-ahead market. The quantities chosen before the auction must be identical across all price scenarios. **This is a scheduling benchmark, not yet a simulation of limit orders, auction acceptance, or actual market settlements.** Later we can separately implement price-contingent bids and the associated market mechanism.
 
-For each 15-minute slot with duration `Δt=0.25 h` (same rule on DST days), battery energy balance:
+### Sets, parameters, and units
 
-`SOC[t+1] = SOC[t] + efficiency_charge × charge_mw[t] × Δt - discharge_mw[t] × Δt / efficiency_discharge`.
+- `t ∈ {1,…,T}`: 15-minute delivery intervals in one local delivery day (`Δt = 0.25` h). Normally `T = 96`; DST days use their actual 92/100 slots.
+- `s ∈ {1,…,S}`: price scenarios; initial target `S=50`.
+- `p[s,t]`: forecast scenario day-ahead price (EUR/MWh). `w[s] ≥ 0`, `Σ_s w[s] = 1` (initially equal weights).
+- `p_actual[t]`: actual cleared day-ahead price, used **only after the fact** for evaluation and the oracle.
+- `Pmax`: symmetric charge/discharge power rating (MW). Separate charge/discharge limits are easy extensions.
+- `Emax`: usable energy capacity (MWh), and `Emin`: lower allowable energy bound (MWh).
+- `ηc, ηd ∈ (0,1]`: charging and discharging efficiencies (not round-trip efficiency inserted twice).
+- `Einit` and `Efinal`: initial and required final stored energy (MWh). An identical terminal condition is used for all models; a simple default for daily comparison is `Efinal = Einit`.
+- `c_c, c_d`: non-price variable operating/degradation costs (EUR/MWh of charging/discharging throughput). For a minimalist experiment these can each be the same illustrative cost or zero; report the assumption.
+- `α ∈ (0,1)`: CVaR confidence level; `λ ≥ 0`: dimensionless risk-aversion weight. These are *design parameters* to be chosen and disclosed, **not estimates from market data**.
 
-Constrain `0 ≤ charge_mw,discharge_mw ≤ power_mw`, SOC bounds, and **prevent simultaneous charge and discharge** (important especially with negative prices; use binary exclusivity or a clearly justified equivalent formulation). Include appropriate initial/terminal SOC assumptions so schedules compare fairly.
+### Common first-stage decision variables
 
-Scenario profit in EUR:
+- `ch[t] ≥ 0`: charging power (MW).
+- `dis[t] ≥ 0`: discharging power (MW).
+- `E[t]`: stored energy at the beginning of interval `t` (MWh), with `E[T+1]` after the final interval.
+- `u[t] ∈ {0,1}`: charging/discharging exclusivity indicator; `u=1` allows charging, `u=0` allows discharging.
+- In the risk model only: `ζ ∈ ℝ`, a free loss threshold (VaR auxiliary variable), and `z[s] ≥ 0`, each scenario's excess loss above `ζ`.
 
-`Π[s] = Σ_t { price[s,t] × (discharge_mw[t] - charge_mw[t]) × Δt - fees_and_wear[t] }`.
+**All** `ch[t], dis[t], E[t], u[t]` are **shared across scenarios** (nonanticipativity). The stochastic model must NOT use `ch[s,t]` or `dis[s,t]` selected after observing the day-ahead price.
 
-Deterministic solves using `mean_s price[s,t]`; stochastic uses `max E[Π] - λ × CVaR_α(-Π)` where `CVaR_α` is the mean of sufficiently bad losses (with the correct loss sign and a linear epigraph formulation). Realized profit after the fact uses the **actual** price path while keeping the pre-auction schedule fixed.
+### Common physical constraints (apply to all three models)
 
-The exact choice of `λ`, tail level, and optimizer should be published before comparing results. Use a tested linear/MILP solver through a suitable Python package (e.g. SciPy HiGHS optimization), not scikit-learn to solve energy dispatch.
+For every `t = 1,…,T`:
+
+```text
+0 ≤ ch[t]  ≤ Pmax * u[t]
+0 ≤ dis[t] ≤ Pmax * (1-u[t])
+u[t] ∈ {0,1}
+
+E[t+1] = E[t] + ηc*ch[t]*Δt - (dis[t]/ηd)*Δt
+
+Emin ≤ E[t] ≤ Emax                    for t=1,…,T+1
+E[1]   = Einit
+E[T+1] = Efinal
+```
+
+The binary `u[t]` prevents simultaneous charge and discharge, including pathological cycles that can arise under negative spot prices. The bounds and energy balance have consistent MW/MWh/hour dimensions. A valid starting example is a 2-hour battery (`Emax/Pmax = 2 h`), but the actual numeric battery specification **has not yet been approved**.
+
+Optional future constraints: cycle/throughput limit, availability windows, ramp constraints, grid import/export limits, battery degradation curve, or reserve capacity. Do **not** present them as implemented yet.
+
+### Revenue and profit under a given price path
+
+For **any** price vector `p[t]`, define
+
+```text
+Profit(ch, dis | p)
+ = Σ_(t=1)^T Δt * [ p[t]*(dis[t]-ch[t])
+                    - c_c*ch[t] - c_d*dis[t] ]       [EUR]
+```
+
+Positive `dis-ch` sells energy; negative `dis-ch` purchases energy. With a **negative** price, buying energy can create positive price revenue, but still consumes physical capacity and incurs any throughput cost. `Π[s] = Profit(ch,dis | p[s,:])`.
+
+### Model A — Deterministic (forecast-based MILP)
+
+Let the point forecast equal the **probability-weighted ensemble mean**
+
+`p_mean[t] = Σ_s w[s] p[s,t]`.
+
+Choose the common power schedule and SOC to solve
+
+```text
+maximize   Profit(ch,dis | p_mean)
+subject to all common physical constraints
+```
+
+The same forecast-origin and inputs must be used for the stochastic model. A median forecast is a different point forecast; using it here would confound risk with the forecast choice.
+
+### Model B — Stochastic risk-aware (mean–CVaR MILP)
+
+Minimize *downside losses* by incorporating `CVaR_α(L)` where scenario loss is `L[s] = -Π[s]`; profit is scenario-dependent only through the ex-ante uncertain prices.
+
+Use the exact linear CVaR epigraph:
+
+```text
+maximize   Σ_s w[s]*Π[s]
+           - λ * ( ζ + [1/(1-α)] * Σ_s w[s]*z[s] )
+
+subject to all common physical constraints
+           z[s] ≥ -Π[s] - ζ           for every scenario s
+           z[s] ≥ 0                   for every scenario s
+           ζ free (can be positive or negative)
+```
+
+When `λ=0`, the stochastic objective reduces **exactly** to the deterministic objective with `p_mean`, assuming matching costs and constraints. **Therefore a difference between Models A and B requires risk aversion, valid recourse, or other nonlinear/price-contingent market features.** For the initial comparison we use `λ>0` and no recourse.
+
+With 50 equally weighted scenarios, an `α=0.95` tail contains only about 2–3 scenarios, making CVaR estimates noisy. Prefer a sensitivity analysis including `α=0.90` (about five tail scenarios) and/or more scenarios, with seeds and validation reported. `λ` must be selected before the held-out test or on a **separate** validation interval; never tune it on October outcomes.
+
+### Model C — Perfect-foresight MILP (evaluation oracle only)
+
+After delivery, solve
+
+```text
+maximize   Profit(ch,dis | p_actual)
+subject to exactly the same common physical constraints
+```
+
+This is the **idealized upper bound on realized profit in this fixed-schedule model** for each individual delivery day. It is not an actionable pre-auction strategy; it deliberately sees the actual price that Models A/B cannot know.
+
+### Realized out-of-sample comparison
+
+For each held-out day `D`, calculate the pre-auction schedules `x_A(D)` and `x_B(D)`, then evaluate **both fixed schedules** at the *same realized* `p_actual(D)`. Solve the oracle only afterward.
+
+```text
+realized_A[D] = Profit(x_A(D) | p_actual(D))
+realized_B[D] = Profit(x_B(D) | p_actual(D))
+oracle[D]     = max_x Profit(x | p_actual(D))
+regret_A[D]   = oracle[D] - realized_A[D]
+regret_B[D]   = oracle[D] - realized_B[D]
+```
+
+Report realized total/mean profit, lower-tail outcomes and CVaR across evaluation days, scenario calibration, SOC profiles, number of cycles/throughput, and regret relative to the oracle. The regret is nonnegative **only under exactly identical feasible sets and cost assumptions**, which is why the same constraints and costs are crucial.
+
+**Solver classification:** because `u[t]` is binary and all remaining expressions are linear, all three problems are **mixed-integer linear programs (MILPs)**. `scikit-learn` is used for price forecasts, *not* for the battery optimization. A MILP-capable solver (e.g., SciPy's `scipy.optimize.milp` backed by HiGHS, or a similarly documented alternative) is required in addition to NumPy, Pandas and Matplotlib.
+
+### Pending numerical specification (intentionally not invented)
+
+Before implementing, choose and record `Pmax, Emax, Emin, ηc, ηd, Einit, Efinal, c_c, c_d, α, λ`, and the solver. Until those are confirmed, **no computed dispatch or performance results exist**.
+
 
 ## Evaluation
 
