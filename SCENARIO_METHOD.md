@@ -1,6 +1,6 @@
 # BESS — approved DE–LU day-ahead research design (v0.5)
 
-**Status (2026-11-06): method is specified; one-day market-price acquisition/validation has now run successfully on GitHub Actions.** Exactly **100 validated 15-minute DE-LU market-price intervals** for delivery day **2026-10-25** were fetched via the documented Energy-Charts `/price` endpoint. Six automated tests passed, and a one-day CSV artifact was uploaded. **No full historical dataset has been downloaded, no BESS operational time series has been fetched, no quantile model has been trained, and no optimizer/performance backtest has been run.**
+**Status (2026-11-06): the full historical DE-LU day-ahead PRICE dataset has been downloaded and passed time-series completeness checks on GitHub Actions.** Run **42305243042** obtained **38,020 quarter-hour rows** for **2025-10-01 through 2026-10-31**, each month checked individually, and saved monthly CSVs and a combined CSV as a downloadable Actions artifact. The six synthetic-code unit tests also passed. **This validates timestamp/coverage checks, not forecast quality, asset-level operational behavior, or price-market revisions.** No measured Bollingstedt quarter-hour dispatch or SOC dataset has been imported, no quantile model has been trained, and no optimizer/performance backtest has been run.
 
 ## Approved provisional operating assumptions (user decision, 2026-11-06)
 
@@ -28,6 +28,16 @@ Real-world auction bids may be price-contingent and have more complex acceptance
 - The run printed: **`100` valid intervals saved** for 2026-10-25 (Berlin fall-DST day); all six tests passed.
 - Initial test failures were useful and **fixed**: compare DST timestamps in UTC and accept the actual API unit spelling `EUR / MWh` in addition to `EUR/MWh`.
 - **Caution:** this success establishes access and schema/completeness for *one delivery day only*. It is not evidence that the entire proposed training/test period is available, complete, or free of revisions. Retrieve a longer history and test day-by-day before claiming a full backtest dataset.
+
+## Full market-price history — completed GitHub Actions acquisition, 2026-11-06
+
+- **Successful run:** https://github.com/SaeedAkbare/BESS/actions/runs/42305243042
+- **Validated output artifact (13 monthly CSVs + one combined CSV):** https://github.com/SaeedAkbare/BESS/actions/runs/42305243042/artifacts/13545788220
+- **Period:** 2025-10-01 through 2026-10-31 (Berlin delivery dates; a full 13 months). **38,020** 15-minute observations reported in logs.
+- **Calendar checks:** each date is compared against its true Berlin-time 15-minute horizon: ordinary 96, fall-back 100, spring-forward 92. Price and timestamp nulls/duplicates are rejected. The combined CSV is sorted in UTC.
+- **API rate limiting:** initial run failed with HTTP 429 in March 2026. The re-run used 15-second inter-request spacing and a controlled retry after one 429 for February; all months then passed and were stored.
+- **Train/test split for next stage:** 2025-10 to 2026-09 for chronological model fitting and residual validation; 2026-10 **strictly held out** for performance measurement. Never use October 2026 prices to train or generate October pre-auction forecasts.
+- **Important limitations:** the artifact contains **market price**, not actual site power/SOC; the program verifies coverage and structural validity but not official historical revisions, source licensing, forecasting leakage or dispatch behavior. No scenario generator or battery MILP has been executed yet.
 
 ## Actual market data and timestamps
 
