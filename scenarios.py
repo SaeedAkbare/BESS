@@ -4,7 +4,7 @@
 قیمت‌های اکتبر ۲۰۲۶ هرگز برای آموزش یا ساختِ باقیمانده‌ها استفاده نمی‌شوند.
 """
 import argparse
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -93,15 +93,23 @@ def scale_residual(actual, lower, middle, upper):
     return np.where(error >= 0, error / positive_spread, error / negative_spread)
 
 
-def calibration_gap(actual, lower, upper, target_coverage=0.80):
-    """حاشیهٔ اضافی بازه را فقط از خطاهای خارج از نمونهٔ گذشته پیدا می‌کند."""
+def score_quantile(scores, target_coverage=0.80):
+    """صدک تجربیِ خطاهای قبلی با اصلاح تعداد نمونه را برمی‌گرداند."""
 
-    # هر مشاهده نشان می‌دهد چقدر از مرز q10–q90 بیرون افتاده است.
-    scores = np.maximum.reduce([lower - actual, actual - upper,
-                                np.zeros(len(actual))])
-    # چندک تصحیح‌شدهٔ split conformal؛ فقط روی گذشته محاسبه می‌شود.
+    scores = np.asarray(scores)
+    if len(scores) == 0:
+        raise ValueError("هیچ خطای قبلی برای کالیبراسیون وجود ندارد.")
+    # رتبهٔ صدک تنها با مشاهده‌های گذشته تعیین می‌شود.
     rank = min(len(scores) - 1, int(np.ceil((len(scores) + 1) * target_coverage)) - 1)
     return float(np.sort(scores)[rank])
+
+
+def calibration_gap(actual, lower, upper, target_coverage=0.80):
+    """میزان بیرون‌زدگی قیمت از بازهٔ خام را با خطاهای واقعیِ گذشته می‌سنجد."""
+
+    scores = np.maximum.reduce([lower - actual, actual - upper,
+                                np.zeros(len(actual))])
+    return score_quantile(scores, target_coverage)
 
 
 def coverage_rate(actual, lower, upper):
@@ -150,43 +158,75 @@ def past_residual_days(table):
     # نمونه‌گیری روزانه باید روی تعداد کافی از روزهای گذشته باشد.
     if len(days) < 50:
         raise ValueError("کمتر از ۵۰ روز باقیماندهٔ تاریخی معتبر داریم.")
-    return np.array(days), gap, raw_coverage, calibrated_coverage
+    # این جدول برای کالیبراسیون غلتان به‌کار می‌رود؛ فقط روزهای گذشته را دارد.
+    past["score"] = np.maximum.reduce([lower - actual, actual - upper,
+                                       np.zeros(len(actual))])
+    return np.array(days), gap, raw_coverage, calibrated_coverage, past[["day", "score"]]
 
 
-def independent_september_check(table, residuals, gap):
-    """بدون تنظیم دوبارهٔ پارامتر، کیفیت کالیبراسیون را روی سپتامبر می‌سنجد."""
+def september_diagnostic(table, residuals, fixed_gap, past_scores):
+    """پوشش سپتامبر را با حاشیهٔ ثابت و کالیبراسیون غلتان مقایسه می‌کند.
 
-    # سپتامبر هرگز در Foldهای بالا یا محاسبهٔ gap وارد نشده است.
+    الگوریتم غلتان بعد از مشاهدهٔ نتیجهٔ روش ثابت طراحی شده است؛
+    پس سپتامبر دیگر آزمونِ کاملاً دست‌نخورده محسوب نمی‌شود.
+    """
+
     first, last = date(2026, 9, 1), date(2026, 10, 1)
     train = table[table["day"] < first]
     valid = table[(table["day"] >= first) & (table["day"] < last)]
     lower, middle, upper = predict(fit_quantiles(train), valid)
     actual = valid["price_eur_mwh"].to_numpy()
 
-    # دو معیار: پوشش بازهٔ اصلی و پوشش بازهٔ کالیبره‌شده.
+    # معیارهای روش قبلی را حفظ می‌کنیم تا مقایسه شفاف باشد.
     before = coverage_rate(actual, lower, upper)
-    after = coverage_rate(actual, lower - gap, upper + gap)
-
-    # ۵۰ سناریو برای هر روز معمولی می‌سازیم و پوشش تجربی آن‌ها را می‌سنجیم.
+    after = coverage_rate(actual, lower - fixed_gap, upper + fixed_gap)
     valid = valid.assign(lower=lower, middle=middle, upper=upper)
-    total_inside, total_points, n_days = 0, 0, 0
+
+    # خطای تمام روزهای قبلی آماده است؛ روزهای سپتامبر تدریجاً اضافه می‌شوند.
+    errors = past_scores.copy()
+    count_inside, total, scenarios_inside, n_days = 0, 0, 0, 0
     for day, one_day in valid.groupby("day", sort=True):
         if len(one_day) != 96:
             continue
-        paths = sample_scenarios(
-            one_day["middle"].to_numpy(),
-            one_day["lower"].to_numpy() - gap,
-            one_day["upper"].to_numpy() + gap,
-            residuals, seed=42 + n_days,
-        )
-        band10, band90 = np.quantile(paths, [0.1, 0.9], axis=0)
+
+        # در آغاز هر روز فقط خطاهای ۳۰ روز تقویمیِ پیش از آن مجازند.
+        recent = errors[(errors["day"] < day) &
+                        (errors["day"] >= day - timedelta(days=30))]
+        if len(recent) < 96 * 10:
+            raise ValueError("کمتر از ده روز خطای تاریخی در پنجرهٔ غلتان وجود دارد.")
+        day_gap = score_quantile(recent["score"].to_numpy())
+
+        # بازهٔ کالیبره‌شده را پیش از خواندن قیمت حقیقی همین روز تعیین می‌کنیم.
+        lo = one_day["lower"].to_numpy()
+        mid = one_day["middle"].to_numpy()
+        hi = one_day["upper"].to_numpy()
         actual_day = one_day["price_eur_mwh"].to_numpy()
-        total_inside += int(((actual_day >= band10) & (actual_day <= band90)).sum())
-        total_points += len(one_day)
+        count_inside += int(((actual_day >= lo - day_gap) &
+                             (actual_day <= hi + day_gap)).sum())
+
+        # پوشش تجربیِ صدک ۱۰ و ۹۰ سناریوها یک معیارِ مستقل از بازه است.
+        paths = sample_scenarios(mid, lo - day_gap, hi + day_gap,
+                                 residuals, seed=42 + n_days)
+        band10, band90 = np.quantile(paths, [0.1, 0.9], axis=0)
+        scenarios_inside += int(((actual_day >= band10) &
+                                 (actual_day <= band90)).sum())
+        total += len(one_day)
         n_days += 1
-    if total_points == 0:
-        raise ValueError("روز قابل‌ارزیابی در سپتامبر پیدا نشد.")
-    return before, after, total_inside / total_points, n_days
+
+        # اکنون قیمت روز سپری‌شده مجاز است به تاریخچهٔ روز بعد اضافه شود.
+        scores = np.maximum.reduce([lo - actual_day, actual_day - hi,
+                                    np.zeros(len(actual_day))])
+        errors = pd.concat([
+            errors, pd.DataFrame({"day": [day] * len(scores), "score": scores})
+        ], ignore_index=True)
+
+    if total == 0:
+        raise ValueError("هیچ روز عادی در سپتامبر برای ارزیابی وجود ندارد.")
+
+    # خطاهای کل سپتامبر در پایان ماه معلوم‌اند و برای پیش‌بینی اکتبر مجازند.
+    sep = errors[(errors["day"] >= first) & (errors["day"] < last)]
+    gap_october = score_quantile(sep["score"].to_numpy())
+    return before, after, count_inside / total, scenarios_inside / total, n_days, gap_october
 
 
 def sample_scenarios(median, lower, upper, historical_days, seed=42, count=50):
@@ -228,15 +268,16 @@ def main():
         raise ValueError("نسخهٔ اولیه فقط روز عادی ۹۶بازه‌ای را می‌پذیرد.")
 
     # کالیبراسیون فقط با فوریه تا اوت؛ سپتامبر برای آزمون مستقل محفوظ است.
-    residuals, gap, raw_calib, fixed_calib = past_residual_days(train)
-    raw_sep, fixed_sep, scenario_sep, sep_days = independent_september_check(
-        train, residuals, gap
+    residuals, gap, raw_calib, fixed_calib, past_scores = past_residual_days(train)
+    raw_sep, fixed_sep, rolling_sep, scenario_sep, sep_days, october_gap = (
+        september_diagnostic(train, residuals, gap, past_scores)
     )
 
     # پس از آزمون مستقل سپتامبر، مدل نهایی تا پایان سپتامبر آموزش می‌بیند.
     # قیمت‌های اکتبر ۲۰۲۶ وارد آموزش یا کالیبراسیون نمی‌شوند.
     lower, middle, upper = predict(fit_quantiles(train), test)
-    lower, upper = lower - gap, upper + gap
+    # حاشیهٔ نهایی فقط از خطاهای سپتامبر ۲۰۲۶ تعیین شده است.
+    lower, upper = lower - october_gap, upper + october_gap
     scenarios = sample_scenarios(middle, lower, upper, residuals)
 
     # قیمت واقعی روز آزمون را در خروجی قرار نمی‌دهیم تا نشت اطلاعات رخ ندهد.
@@ -254,9 +295,11 @@ def main():
     print(f"روزهای باقیماندهٔ خارج از نمونه: {len(residuals)}")
     print(f"حاشیهٔ کالیبراسیون از فوریه تا اوت: {gap:.2f} یورو/MWh")
     print(f"پوشش همان دوره قبل/بعد از اصلاح: {raw_calib:.3f} / {fixed_calib:.3f}")
-    print(f"آزمون مستقل سپتامبر ({sep_days} روز)، پوشش قبل/بعد: "
-          f"{raw_sep:.3f} / {fixed_sep:.3f}")
-    print(f"پوشش بازهٔ تجربی ۱۰–۹۰٪ سناریوها در سپتامبر: {scenario_sep:.3f}")
+    print(f"سپتامبر ({sep_days} روز)، پوشش خام/اصلاح ثابت/اصلاح غلتان: "
+          f"{raw_sep:.3f} / {fixed_sep:.3f} / {rolling_sep:.3f}")
+    print(f"پوشش صدک ۱۰–۹۰٪ سناریوهای غلتان سپتامبر: {scenario_sep:.3f}")
+    print(f"حاشیهٔ صرفاً گذشته برای شروع اکتبر: {october_gap:.2f} یورو/MWh")
+    print("هشدار: سپتامبر برای توسعه بررسی شده، آزمونِ دست‌نخورده نیست.")
     print(f"۵۰ سناریو با وزن برابر ۱/۵۰ ساخته شد: {args.output}")
     print("نکته: کالیبراسیون حاشیه‌ای تضمین CVaR یا اعتبار اقتصادی نمی‌دهد.")
 
