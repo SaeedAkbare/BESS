@@ -185,6 +185,8 @@ def september_diagnostic(table, residuals, fixed_gap, past_scores):
     # خطای تمام روزهای قبلی آماده است؛ روزهای سپتامبر تدریجاً اضافه می‌شوند.
     errors = past_scores.copy()
     count_inside, total, scenarios_inside, n_days = 0, 0, 0, 0
+    # نسبت خطای واقعی به پهنای ۱۰–۹۰٪ سناریوها را برای تنظیم ماه بعد نگه می‌داریم.
+    risk_ratios = []
     for day, one_day in valid.groupby("day", sort=True):
         if len(one_day) != 96:
             continue
@@ -210,6 +212,13 @@ def september_diagnostic(table, residuals, fixed_gap, past_scores):
         band10, band90 = np.quantile(paths, [0.1, 0.9], axis=0)
         scenarios_inside += int(((actual_day >= band10) &
                                  (actual_day <= band90)).sum())
+        # میزان افزایش لازمِ سناریوهای مثبت و منفی نسبت به میانه.
+        positive_width = np.maximum(band90 - mid, 1.0)
+        negative_width = np.maximum(mid - band10, 1.0)
+        ratios_day = np.where(actual_day >= mid,
+                              (actual_day - mid) / positive_width,
+                              (mid - actual_day) / negative_width)
+        risk_ratios.extend(ratios_day)
         total += len(one_day)
         n_days += 1
 
@@ -226,7 +235,10 @@ def september_diagnostic(table, residuals, fixed_gap, past_scores):
     # خطاهای کل سپتامبر در پایان ماه معلوم‌اند و برای پیش‌بینی اکتبر مجازند.
     sep = errors[(errors["day"] >= first) & (errors["day"] < last)]
     gap_october = score_quantile(sep["score"].to_numpy())
-    return before, after, count_inside / total, scenarios_inside / total, n_days, gap_october
+    # فقط پس از پایان سپتامبر، یک ضریب پهنا برای کل سناریوهای اکتبر تعیین می‌کنیم.
+    scenario_factor = max(1.0, score_quantile(np.array(risk_ratios)))
+    return (before, after, count_inside / total, scenarios_inside / total,
+            n_days, gap_october, scenario_factor)
 
 
 def sample_scenarios(median, lower, upper, historical_days, seed=42, count=50):
@@ -244,6 +256,33 @@ def sample_scenarios(median, lower, upper, historical_days, seed=42, count=50):
     # باقیمانده‌های نرمال‌شده را متناسب با عدم‌قطعیت روز جدید بازسازی می‌کنیم.
     spreads = np.where(selected >= 0, upper_spread, lower_spread)
     return median + selected * spreads
+
+
+def evaluate_october(table, models, residuals, gap, factor):
+    """آزمون نهایی اکتبر: قیمت واقعی فقط پس از ساخت سناریو خوانده می‌شود."""
+
+    october = table[(table["day"] >= date(2026, 10, 1)) &
+                    (table["day"] <= date(2026, 10, 31))]
+    in_band, in_scenarios, n, n_days = 0, 0, 0, 0
+    for day, rows in october.groupby("day", sort=True):
+        # نسخهٔ فعلی روز تغییر ساعت پاییزیِ ۱۰۰ بازه‌ای را پشتیبانی نمی‌کند.
+        if len(rows) != 96:
+            continue
+        low, median, high = predict(models, rows)
+        low, high = low - gap, high + gap
+        # از قیمت روز برای تولید مسیرها استفاده نشده است.
+        paths = sample_scenarios(median, low, high, residuals,
+                                 seed=42 + n_days)
+        paths = median + factor * (paths - median)
+        p10, p90 = np.quantile(paths, [0.1, 0.9], axis=0)
+        actual = rows["price_eur_mwh"].to_numpy()
+        in_band += int(((actual >= low) & (actual <= high)).sum())
+        in_scenarios += int(((actual >= p10) & (actual <= p90)).sum())
+        n += len(actual)
+        n_days += 1
+    if n == 0:
+        raise ValueError("هیچ روز عادی در اکتبر برای آزمون وجود ندارد.")
+    return in_band / n, in_scenarios / n, n_days
 
 
 def main():
@@ -267,23 +306,32 @@ def main():
     if len(test) != 96:
         raise ValueError("نسخهٔ اولیه فقط روز عادی ۹۶بازه‌ای را می‌پذیرد.")
 
-    # کالیبراسیون فقط با فوریه تا اوت؛ سپتامبر برای آزمون مستقل محفوظ است.
+    # کالیبراسیون مقدماتی با فوریه تا اوت؛ سپتامبر ماه توسعه است.
     residuals, gap, raw_calib, fixed_calib, past_scores = past_residual_days(train)
-    raw_sep, fixed_sep, rolling_sep, scenario_sep, sep_days, october_gap = (
+    raw_sep, fixed_sep, rolling_sep, scenario_sep, sep_days, october_gap, factor = (
         september_diagnostic(train, residuals, gap, past_scores)
     )
 
-    # پس از آزمون مستقل سپتامبر، مدل نهایی تا پایان سپتامبر آموزش می‌بیند.
-    # قیمت‌های اکتبر ۲۰۲۶ وارد آموزش یا کالیبراسیون نمی‌شوند.
-    lower, middle, upper = predict(fit_quantiles(train), test)
+    # مدل نهایی تا پایان سپتامبر آموزش می‌بیند؛ قیمت‌های اکتبر وارد آموزش نمی‌شوند.
+    models = fit_quantiles(train)
+    # معیارهای اکتبر فقط یک بار، بعد از قفل‌کردن ضریب‌ها، گزارش می‌شوند.
+    october_band, october_paths, october_days = evaluate_october(
+        table, models, residuals, october_gap, factor
+    )
+    lower, middle, upper = predict(models, test)
     # حاشیهٔ نهایی فقط از خطاهای سپتامبر ۲۰۲۶ تعیین شده است.
     lower, upper = lower - october_gap, upper + october_gap
     scenarios = sample_scenarios(middle, lower, upper, residuals)
+    # ضریبِ فقط-سپتامبر، پراکندگی همهٔ مسیرها را حول پیش‌بینی مرکزی افزایش می‌دهد.
+    scenarios = middle + factor * (scenarios - middle)
+    p10, p90 = np.quantile(scenarios, [0.1, 0.9], axis=0)
 
-    # قیمت واقعی روز آزمون را در خروجی قرار نمی‌دهیم تا نشت اطلاعات رخ ندهد.
+    # این فایل فقط پیش‌بینی و سناریوست؛ قیمت واقعی روز هدف در آن نیست.
+    # «بازهٔ کالیبره» لزوماً چندک حقیقی q10/q90 نیست؛ نام درست می‌گذاریم.
     result = pd.DataFrame({
         "timestamp_utc": test["timestamp_utc"].dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "q10": lower, "q50": middle, "q90": upper,
+        "lower_calibrated": lower, "q50_forecast": middle, "upper_calibrated": upper,
+        "scenario_p10": p10, "scenario_p90": p90,
     })
     for i, one_path in enumerate(scenarios, start=1):
         result[f"scenario_{i:02d}"] = one_path
@@ -299,7 +347,10 @@ def main():
           f"{raw_sep:.3f} / {fixed_sep:.3f} / {rolling_sep:.3f}")
     print(f"پوشش صدک ۱۰–۹۰٪ سناریوهای غلتان سپتامبر: {scenario_sep:.3f}")
     print(f"حاشیهٔ صرفاً گذشته برای شروع اکتبر: {october_gap:.2f} یورو/MWh")
-    print("هشدار: سپتامبر برای توسعه بررسی شده، آزمونِ دست‌نخورده نیست.")
+    print(f"ضریب پهنای مسیرها (تنظیم فقط روی سپتامبر): {factor:.3f}")
+    print(f"آزمون دست‌نخوردهٔ اکتبر ({october_days} روز عادی)، "
+          f"پوشش بازه/صدک سناریوها: {october_band:.3f} / {october_paths:.3f}")
+    print("هشدار: سپتامبر ماه توسعه است؛ ۲۵ اکتبر ۱۰۰بازه‌ای در آزمون سناریو حذف شده.")
     print(f"۵۰ سناریو با وزن برابر ۱/۵۰ ساخته شد: {args.output}")
     print("نکته: کالیبراسیون حاشیه‌ای تضمین CVaR یا اعتبار اقتصادی نمی‌دهد.")
 
