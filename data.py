@@ -77,8 +77,8 @@ def fetch_prices(start, end):
     # متن JSON دریافتی را به دیکشنری پایتون تبدیل می‌کنیم.
     raw = response.json()
 
-    # طبق مستندات، قیمت باید به EUR/MWh باشد.
-    if raw.get("unit") != "EUR/MWh":
+    # API ممکن است بین EUR و / و MWh فاصله بگذارد؛ فاصله را حذف می‌کنیم.
+    if str(raw.get("unit", "")).replace(" ", "") != "EUR/MWh":
         raise ValueError(f"واحد قیمت غیرمنتظره: {raw.get('unit')}")
 
     # دو آرایهٔ زمان و قیمت باید موجود و هم‌طول باشند.
