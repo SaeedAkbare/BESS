@@ -1,6 +1,14 @@
-# BESS — approved DE–LU day-ahead research design (v0.4)
+# BESS — approved DE–LU day-ahead research design (v0.5)
 
 **Status (2026-11-06): project design approved; industrial-practice audit added; this file contains specifications, NOT executed results.** No verified API download, trained forecast, optimizer run, or measured performance is claimed.
+
+## Approved provisional operating assumptions (user decision, 2026-11-06)
+
+These are **modeling decisions**, not measured Bollingstedt specifications:
+
+- **Cyclic daily energy:** `E[T+1] = E[1]`; the common `E[1]` is **a decision variable** within the allowed energy window, rather than an imposed 50% SOC or a freely different final SOC. This is suitable for a **single-day mathematical sensitivity study** but must not be misrepresented as a reconstructable real operating schedule: a battery's initial energy at the bidding decision is physically given. A rigorous historical backtest should use a **fixed, observed or explicitly pre-committed common initial energy across all models**, or a chronological multi-day run that carries ending energy into the next day. The free-initial benchmark must be labeled as an *optimistic relaxed benchmark* and kept separate from realistic evaluation.
+- **Maintenance cost:** include **variable O&M charging and discharging coefficients** and **fixed O&M allocation** in the mathematics/accounting, with provisional inputs `c_vom_ch = 0 EUR/MWh`, `c_vom_dis = 0 EUR/MWh`, `FOM_daily = 0 EUR/day`. They are zeros **by deliberate experimental assumption**, *not* verified Bollingstedt O&M costs.
+- **Degradation cost is conceptually distinct from O&M**. Keep `c_deg_ch` and `c_deg_dis` as separate parameters; their asset-specific numeric values are unknown. Do not silently infer from the O&M=0 setting that battery wear is zero. A first demonstration may deliberately set degradation to zero too **only if labeled as a separate assumption**.
 
 ## Goal and three strategies
 
@@ -48,15 +56,15 @@ Keep K-nearest-neighbour historical analogue days as an **optional later forecas
 - `Pmax`: symmetric charge/discharge power rating (MW). Separate charge/discharge limits are easy extensions.
 - `Emax`: usable energy capacity (MWh), and `Emin`: lower allowable energy bound (MWh).
 - `ηc, ηd ∈ (0,1]`: charging and discharging efficiencies (not round-trip efficiency inserted twice).
-- `Einit` and `Efinal`: initial and required final stored energy (MWh). An identical terminal condition is used for all models; a simple default for daily comparison is `Efinal = Einit`.
-- `c_c, c_d`: non-price variable operating/degradation costs (EUR/MWh of charging/discharging throughput). For a minimalist experiment these can each be the same illustrative cost or zero; report the assumption.
+- `E0`: shared daily initial and terminal energy decision variable (MWh) for the relaxed single-day experiment, `E[1] = E[T+1] = E0`, `Emin ≤ E0 ≤ Emax`. This is **not** measured initial SOC; see approved-assumptions caveat for real backtests.
+- `c_vom_ch, c_vom_dis`: **variable maintenance/O&M** rates, provisionally **0 EUR/MWh** for each direction. `FOM_daily`: **fixed O&M** allocation, provisionally **0 EUR/day**. `c_deg_ch, c_deg_dis`: distinct battery degradation/wear charges (EUR/MWh of AC throughput), **not yet quantified**; do not double count them.
 - `α ∈ (0,1)`: CVaR confidence level; `λ ≥ 0`: dimensionless risk-aversion weight. These are *design parameters* to be chosen and disclosed, **not estimates from market data**.
 
 ### Common first-stage decision variables
 
 - `ch[t] ≥ 0`: charging power (MW).
 - `dis[t] ≥ 0`: discharging power (MW).
-- `E[t]`: stored energy at the beginning of interval `t` (MWh), with `E[T+1]` after the final interval.
+- `E[t]`: stored energy at the beginning of interval `t` (MWh), with `E[T+1]` after the final interval. Its initial value `E0=E[1]` is **optimized** in the relaxed daily benchmark subject to the cyclic equality.
 - `u[t] ∈ {0,1}`: charging/discharging exclusivity indicator; `u=1` allows charging, `u=0` allows discharging.
 - In the risk model only: `ζ ∈ ℝ`, a free loss threshold (VaR auxiliary variable), and `z[s] ≥ 0`, each scenario's excess loss above `ζ`.
 
@@ -74,11 +82,12 @@ u[t] ∈ {0,1}
 E[t+1] = E[t] + ηc*ch[t]*Δt - (dis[t]/ηd)*Δt
 
 Emin ≤ E[t] ≤ Emax                    for t=1,…,T+1
-E[1]   = Einit
-E[T+1] = Efinal
+E[1]   = E0
+E[T+1] = E0
+Emin ≤ E0 ≤ Emax                       (E0 is optimized here)
 ```
 
-The binary `u[t]` prevents simultaneous charge and discharge, including pathological cycles that can arise under negative spot prices. The bounds and energy balance have consistent MW/MWh/hour dimensions. A valid starting example is a 2-hour battery (`Emax/Pmax = 2 h`), but the actual numeric battery specification **has not yet been approved**.
+The binary `u[t]` prevents simultaneous charge and discharge, including pathological cycles that can arise under negative spot prices. The bounds and energy balance have consistent MW/MWh/hour dimensions. **For operational or walk-forward realized-profit evaluation, replace the optimized E0 by a physical measured/pre-committed initial state (or chronological cross-day SOC carryover), identically for A, B, and C.** A valid starting example is a 2-hour battery (`Emax/Pmax = 2 h`), but the actual numeric battery specification **has not yet been approved**.
 
 Optional future constraints: cycle/throughput limit, availability windows, ramp constraints, grid import/export limits, battery degradation curve, or reserve capacity. Do **not** present them as implemented yet.
 
@@ -87,12 +96,18 @@ Optional future constraints: cycle/throughput limit, availability windows, ramp 
 For **any** price vector `p[t]`, define
 
 ```text
-Profit(ch, dis | p)
+Profit_operating(ch, dis | p)
  = Σ_(t=1)^T Δt * [ p[t]*(dis[t]-ch[t])
-                    - c_c*ch[t] - c_d*dis[t] ]       [EUR]
+                    - c_vom_ch*ch[t] - c_vom_dis*dis[t]
+                    - c_deg_ch*ch[t] - c_deg_dis*dis[t] ]       [EUR]
+
+Profit_net(ch,dis | p) = Profit_operating(ch,dis | p) - FOM_daily
+
+Provisional O&M only: c_vom_ch = 0, c_vom_dis = 0, FOM_daily = 0.
+Degradation cost terms are independent and still require specification.
 ```
 
-Positive `dis-ch` sells energy; negative `dis-ch` purchases energy. With a **negative** price, buying energy can create positive price revenue, but still consumes physical capacity and incurs any throughput cost. `Π[s] = Profit(ch,dis | p[s,:])`.
+Positive `dis-ch` sells energy; negative `dis-ch` purchases energy. With a **negative** price, buying energy can create positive price revenue, but still consumes physical capacity and incurs any throughput cost. Use `Π[s] = Profit_net(ch,dis | p[s,:])` consistently in all three objectives. Fixed O&M is zero in the approved initial run; if later set nonzero it changes reported net margins but is schedule-invariant for this short horizon.
 
 ### Model A — Deterministic (forecast-based MILP)
 
@@ -158,7 +173,7 @@ Report realized total/mean profit, lower-tail outcomes and CVaR across evaluatio
 
 ### Pending numerical specification (intentionally not invented)
 
-Before implementing, choose and record `Pmax, Emax, Emin, ηc, ηd, Einit, Efinal, c_c, c_d, α, λ`, and the solver. Until those are confirmed, **no computed dispatch or performance results exist**.
+Before implementing, choose and record `Pmax, Emax, Emin, ηc, ηd, c_deg_ch, c_deg_dis, α, λ`, the solver, and the actual measured/precommitted E0 needed for *operationally valid* backtests. **Already provisionally set by user:** cyclic relaxed daily boundary `E[1]=E[T+1]=E0` with optimized E0; variable O&M both zero; fixed O&M daily zero. Until those are confirmed, **no computed dispatch or performance results exist**.
 
 
 ## Industrial practice audit — operational and commercial realism (2026-11-06)
@@ -170,8 +185,8 @@ Before implementing, choose and record `Pmax, Emax, Emin, ηc, ηd, Einit, Efina
 - **SOE (state of energy)**: energy stored, `E[t]`, in **MWh**; define energy percentage `SOE_frac[t] = E[t] / E_available[t]`.
 - **SOC (state of charge)**: electrochemical charge-state fraction normally in **%**, tracked by the BMS. It need not be numerically identical to energy fraction when voltage/usable capacity depend on state or temperature.
 - In the **simple linear optimization** we explicitly **approximate SOC and normalized SOE as equal**, using `soc[t] := E[t] / E_available` with constant available capacity for a day. This is a modeling approximation, **not** an electrochemical identity.
-- Define independently: `soc_min`, `soc_max`, `soc_initial`, and `soc_final`. Convert to the E bounds and terminal value with a consistent capacity basis. For example, `Emin=soc_min*E_available`, `Emax=soc_max*E_available`. The hardware's nameplate energy rating and the **usable** energy between SOC limits are different quantities.
-- Preserve `E[t]` across consecutive days in multi-day simulations; do not freely reset SOC each morning. For a **one-day independent benchmark only**, `E[T+1]=E[1]` is a clear, conservative terminal policy; it is not a universally optimal industrial policy. A multi-day rolling horizon can instead use a terminal energy target/value.
+- Define `soc_min` and `soc_max` and convert to energy bounds on a consistent capacity basis, e.g., `Emin=soc_min*E_available`, `Emax=soc_max*E_available`. **For the user-approved relaxed one-day benchmark** set `soc_initial = soc_final` but let their common value be optimized within those bounds. This is **not** an observed initial SOC or a physical pre-auction decision. The hardware's nameplate energy rating and the **usable** energy between SOC limits are different quantities.
+- Preserve `E[t]` across consecutive days in multi-day simulations; do not freely reset SOC each morning. For a **one-day independent benchmark only**, impose `E[T+1]=E[1]`, and for the **relaxed** benchmark here let the common value be optimized. Even this cyclic condition does not make free-initial energy physically available at the start of a real trading day. A multi-day rolling horizon should carry SOC forward; realistic out-of-sample comparisons need an exogenously known initial state.
 
 ### B. Charge/discharge limits and energy balance (essential for v1)
 
@@ -215,9 +230,9 @@ Profit_variable(s)
 
 This example is **not immediately an MILP as written** if `max(·,0)` is implemented naïvely; model a **nonnegative import variable** `import_MW[t]` and enforce its relation to net power, with appropriate energy-settlement rules and import/export exclusivity if needed. For the v1 minimal MILP, set `fees_import=0` until site-specific tariffs are documented; retain linear variable O&M and incremental degradation in the existing `c_c,c_d` factors **without counting the same cost twice**.
 
-- `c_vom_ch,c_vom_dis` (EUR/MWh of AC charging/discharging energy) only when justified by service or maintenance contracts; these coefficients are **not default hard-coded market facts**.
+- `c_vom_ch,c_vom_dis` (EUR/MWh of AC charging/discharging energy) are **both explicitly set to zero for the first experiment on the user's instruction**. Keep them in the profit function as configurable parameters, and flag zero as **ASSUMED, not verified**. Likewise `FOM_daily=0 EUR/day` is a deliberate first-run accounting assumption. No site contract or project-specific public number was inferred.
 - `c_deg_dis` (EUR/MWh AC discharged) is a **simple linear wear proxy** calibrated from replacement economics/warranty throughput, **not** an exact physical aging model. More advanced lifecycle models consider depth of discharge, SOC level, calendar aging, temperature, and the manufacturer's throughput/cycle warranty.
-- **Fixed O&M** `FOM` (often EUR/MW/year or fraction of CAPEX per year) is a **constant for an already installed asset** over a single 24-hour dispatch. Therefore `-FOM_daily` changes **reported net financial profit** but **not the profit-maximizing schedule**. If comparing operating strategies, report gross margin, variable net margin, and allocated FOM separately.
+- **Fixed O&M** `FOM` (often EUR/MW/year or fraction of CAPEX per year) is a **constant for an already installed asset** over a single 24-hour dispatch. Therefore `-FOM_daily` changes **reported net financial profit** but **not the profit-maximizing schedule**. In the approved initial experiment, `FOM_daily=0 EUR/day` but the line remains visible in accounting. If comparing operating strategies, report gross margin, variable net margin, and allocated FOM separately.
 - Likewise **CAPEX and financing** affect investment feasibility/LCOS, not short-horizon marginal dispatch if they are sunk and invariant. **Do not mislabel a throughput depreciation charge as the ATB's fixed O&M**.
 - **Auxiliary consumption** can materially affect margins and net power; if simplified away, disclose `P_aux=0` rather than implying a fully modeled industrial site.
 
