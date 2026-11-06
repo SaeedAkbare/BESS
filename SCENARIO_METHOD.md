@@ -1,71 +1,80 @@
-# BESS — Day-ahead DE–LU price scenario design (v0.1)
+# BESS — approved DE–LU day-ahead research design (v0.2)
 
-**Status:** Methodological design only. No market prices have been downloaded, no forecast model trained, and no battery-optimization results have been produced yet.
+**Status (2026-11-06): project design approved; this file contains specifications, NOT executed results.** No verified API download, trained forecast, optimizer run, or measured performance is claimed.
 
-## Decision
+## Goal and three strategies
 
-Start with **conditional historical analogue days** (k-nearest-neighbours; `sklearn.neighbors.NearestNeighbors`) for *full-day price-path scenarios*. It is a published, reproducible benchmark for the German–Luxembourg day-ahead electricity market, not a claim that all industrial traders use it. Later compare it with a quantile-regression + whole-day residual bootstrap method.
+Compare the **same battery** over historical Germany–Luxembourg (DE-LU) day-ahead delivery days. All live strategies act on information available **before the day-ahead auction**, not on future cleared prices.
 
-A random independent Gaussian perturbation of each 15-minute price is **not** a good baseline: it destroys within-day dependence and often poorly represents spikes and negative prices.
+1. **Deterministic (forecast-based)**: optimize one common 15-minute charge/discharge schedule using one point forecast. For comparability to the risk-neutral stochastic objective, use the **arithmetic expected price from the scenario ensemble** (not the median, which in general differs from the expectation).
+2. **Stochastic (risk-aware)**: optimize one common, nonanticipative schedule against all weighted price paths; objective **maximize expected profit minus λ × CVaR of loss** at a chosen tail level (e.g. 95%, tunable). The schedule is the *same* in every price scenario because the auction price is not yet known when the decision is made. Scenarios affect the profit distribution and risk term, not which schedule gets submitted after the fact. At λ=0 and with linear price revenue, this collapses mathematically to strategy 1 with ensemble-mean prices.
+3. **Perfect-foresight oracle**: retrospectively optimize a feasible schedule using **actual** cleared day-ahead prices. This is an optimistic reference/upper bound for the simplified scheduling model, **not a deployable pre-auction trading strategy**. It is not legitimate to claim an oracle schedule could have been bid at those already-revealed prices.
 
-## Market definition and historical data
+Real-world auction bids may be price-contingent and have more complex acceptance, clearing, and product constraints. v0.2 uses an explicitly simplified **price-taker, fixed pre-auction schedule** for an apples-to-apples educational benchmark. It does not simulate the auction clearing mechanism, execution risks, intraday corrections, or imbalance settlements.
 
-- Market: coupled **Germany–Luxembourg (DE-LU)** bidding zone, day-ahead, EUR/MWh.
-- Since delivery day 2025-10-01, the official European day-ahead MTU is **15 minutes**. Usually 96 intervals per local day.
-- **DST exception**: 2026-10-25 in Europe/Berlin has 100 15-minute intervals. Do not silently discard or merge the repeated hour; use timezone-aware timestamps and verify expected interval counts.
-- Public read-only candidate: Fraunhofer ISE Energy-Charts API `GET https://api.energy-charts.info/v2/price?bzn=DE-LU&start=2026-10-01&end=2026-10-31`. API documents EUR/MWh, DE-LU, and licensing/attribution to Energy-Charts.info and SMARD/Bundesnetzagentur. **This exact October query has not been executed successfully from this session**. Do not invent price data.
-- To backtest **October 2026**, fit only on information available *before each forecast issue time*. For a simple frozen holdout, use training through 2026-09-30; October 2026 must not also be in training. Prefer at least ~12 months of 15-minute history where available, and monitor shifts in market regime.
+## Actual market data and timestamps
 
-## Baseline method: conditional historical analogue days
+- Bidding zone: **DE–LU**; settlement price **EUR/MWh**.
+- Day-ahead resolution from 2025-10-01 is **15-minute MTU**: normally 96 slots/day. Treat timestamps as timezone-aware `Europe/Berlin`; DST changeover days can contain 92 or 100 slots (October 25, 2026 has 100). Define the optimizer horizon dynamically instead of assuming 96 always.
+- Data candidate: Fraunhofer ISE Energy-Charts API `https://api.energy-charts.info/v2/price?bzn=DE-LU&start=2026-10-01&end=2026-10-31`; endpoint, timestamps, schema and actual historical completeness **must be verified by an actual fetch** before implementation is claimed. Retain source and licensing attribution.
+- For initial backtest: hold out **October 2026**. Fit parameters only using past data, e.g. Oct 2025–Sep 2026, then test day-by-day on Oct 2026 in a reproducible out-of-sample procedure. The tested day must never appear in fitted features, residuals, or calibration data.
+- Use only ex-ante-known covariates at forecast issue time: calendar, eligible lagged day-ahead prices, and if accessible *archived forecasts* for wind, solar and load. **Do not leak actual next-day demand or generation.**
 
-1. For each target delivery day D, build a feature vector using **only data that would have been known before the day-ahead auction**: calendar/day-of-week/season, previous-day price shape, and ideally published *day-ahead forecasts* of wind, solar generation, and load. Never substitute tomorrow's realised generation/load.
-2. Build the same feature vectors for historical days, standardized using a scaler fit on training data only. If using weather/load vectors, scale groups sensibly so a large-magnitude feature does not dominate the Euclidean distance.
-3. `NearestNeighbors` finds K historically similar days (initial experiment K=30 or 50; tune in chronological validation). Take their **complete, actual price trajectories** as scenarios. A full-day trajectory retains adjacent-interval dependence, troughs, and peaks.
-4. Give scenarios equal weights initially (1/K) or optionally distance-based nonnegative weights normalized to one. Record the choice.
-5. Keep a separate *unconditional full-day historical sampling* baseline to quantify whether conditioning really helps. Do not treat K=50 as an optimal number without testing.
-6. Dates with 92/100 intervals require explicit DST handling (e.g. a DST-aware horizon / separate analogue pool). Never force invalid 96-length arrays through the battery optimizer.
+## Scenario generator — primary approach: quantile regression + trajectory residual bootstrap
 
-This directly adapts the *informed historical kNN* baseline described in Hilger et al., **Applied Energy 367 (2024), 123241**. Their paper used scikit-learn `NearestNeighbors` and day-level price paths conditioned on forecasts of wind, solar, load and the previous day's prices. Their study predates the 2025 move to quarter-hourly day-ahead trading; this project adapts rather than copies their hourly implementation.
+Target: ~**50 complete day-ahead price-path scenarios** per delivery day, with initially equal probabilities (2% each) and optionally a time-valid weighting scheme.
 
-## Later extension: probabilistic forecast + trajectory-residual bootstrap
+1. **Data engineering** using `pandas` and `numpy`: align prices on timezone-aware 15-minute delivery timestamps, and construct features available before the auction. Handle DST and missing slots explicitly.
+2. **Chronological training/validation**: fit a consistent `scikit-learn` pipeline only on prior days. Use rolling-origin or temporally separated validation; fit preprocessing/scaling on each training fold only.
+3. **Quantile regression**: use `sklearn.ensemble.HistGradientBoostingRegressor(loss="quantile", quantile=q)` for q = 0.10, 0.50, 0.90, with a small, transparently tuned hyperparameter grid. Check quantile crossing and recalibrate on prior held-out dates.
+4. **Honest daily residuals**: obtain historically *out-of-sample* predictions, then compute complete daily residual vectors `r[d,t] = actual_price[d,t] - predicted_median[d,t]`. Never build residual samples from in-sample fitted residuals.
+5. **Scale by conditional uncertainty**: if used, scale positive residuals by historical upper predicted spread (`q90-q50`) and negative residuals by lower spread (`q50-q10`); use minimum positive denominators and safe handling for quantile crossing. Reapply target-day conditional spread on reconstruction. This is an approximation requiring empirical calibration.
+6. **Whole-day bootstrap**: sample 50 past *daily residual vectors* (optionally conditioned on similar features/market regime) **as blocks**, not slot-by-slot independently. Apply the target day median and spreads to each vector. A whole-day block better preserves intraday residual autocorrelation, spikes and negative-price sequences. It does **not** by itself guarantee correct scenario dependence or calibration.
+7. **DST**: never add 96-length residuals to 100-length price paths. Use a defined DST-aware matching/alignment scheme or analyze DST dates separately and label exclusions.
+8. **Scenario output**: matrix `prices[scenario, interval]` and nonnegative weights `probabilities[scenario]` summing to one; store forecast issue time, data cutoff, random seed, and source version.
 
-After baseline performance is established:
+Keep K-nearest-neighbour historical analogue days as an **optional later forecasting benchmark**, not as a component of the accepted main pipeline. Independent Gaussian noise at every quarter-hour is a poor benchmark because it destroys the path dependence.
 
-1. Train a point price forecast and a few conditional quantiles (e.g. q10/q50/q90) with `sklearn.ensemble.HistGradientBoostingRegressor(loss="quantile", quantile=q)` (or `GradientBoostingRegressor` if a smaller dataset favours simplicity).
-2. Compute **out-of-sample, past-only** historical residual *vectors covering entire days*, ideally stratified by comparable day/market conditions. Sample these vectors as blocks and add them to a conditional point forecast; optionally calibrate scenario spreads to held-out quantiles.
-3. Preserve day-path dependence and negative prices. Do not claim a quantile interval by itself gives a coherent joint distribution; evaluate whether the reconstructed paths are calibrated.
-4. Consider more complex multivariate normalizing flows only if simple methods fail on real out-of-sample diagnostics; the research shows they can outperform kNN baselines, but they do **not** fit the minimal-scikit-learn-only first version.
+## Single battery specification used in all three runs
 
-## Deterministic versus stochastic BESS comparison
+Inputs, to be confirmed: `power_mw`, `energy_mwh`, charge and discharge efficiencies, minimum/maximum SOC, initial SOC, terminal SOC requirement, transaction costs and degradation €/MWh, and optional cycle limits.
 
-- Same battery physical parameters in both runs: power (MW), energy (MWh), charge/discharge efficiencies, SOC limits/initial-final conditions, cycle or degradation costs, and interval duration `Δt=0.25 h`.
-- **Deterministic**: optimize against one point forecast (e.g. calibrated expected price).
-- **Stochastic**: optimize against a weighted set of full-day price scenarios **at the correct decision stage**. If the entire power schedule is chosen before prices are known and the objective is *only* expected linear profit, the stochastic formulation collapses to optimizing against expected prices. For a meaningful comparison include an explicit risk objective (e.g. mean–CVaR) **or** correctly defined post-revelation recourse/nonanticipativity. Otherwise differing results can be a modeling artefact.
-- Distinguish **pre-auction bidding** (day-ahead prices uncertain) from **post-auction dispatch** (cleared day-ahead prices already observed). Scenario-dependent schedules chosen before prices are revealed without nonanticipativity constitute unrealistic perfect foresight.
+For each 15-minute slot with duration `Δt=0.25 h` (same rule on DST days), battery energy balance:
 
-## Out-of-sample evaluation
+`SOC[t+1] = SOC[t] + efficiency_charge × charge_mw[t] × Δt - discharge_mw[t] × Δt / efficiency_discharge`.
 
-Use walk-forward / rolling-origin splits, recalibrating as time advances, with no look-ahead. Compare:
-- Forecast point error (MAE); prediction-interval **empirical coverage** and pinball loss.
-- Full trajectory reliability: distribution of negative prices, spikes, day spread, autocorrelation and within-day price differences; energy score / variogram score if practical.
-- Operational value: feasible BESS schedule, realized profit under actual historical prices, risk measures such as lower-tail profit/CVaR, and effect of degradation/fees.
-- Report uncertainty and avoid declaring an economic winner from one illustrative day.
+Constrain `0 ≤ charge_mw,discharge_mw ≤ power_mw`, SOC bounds, and **prevent simultaneous charge and discharge** (important especially with negative prices; use binary exclusivity or a clearly justified equivalent formulation). Include appropriate initial/terminal SOC assumptions so schedules compare fairly.
 
-## Suggested very small Python project later
+Scenario profit in EUR:
 
-`data.py`: API fetch, timezone-aware validation and local caching.  
-`scenarios.py`: scikit-learn analogue-day scenario generator.  
-`battery.py`: deterministic and stochastic/risk-aware optimizer.  
-`compare.py`: walk-forward experiment and plots with pandas, numpy, matplotlib.  
-`requirements.txt`: numpy, pandas, matplotlib, scikit-learn, requests, plus a deliberately selected optimization library.
+`Π[s] = Σ_t { price[s,t] × (discharge_mw[t] - charge_mw[t]) × Δt - fees_and_wear[t] }`.
 
-**The user has not yet finalized how scikit-learn should be used; do not lock in the later model implementation before that specification.**
+Deterministic solves using `mean_s price[s,t]`; stochastic uses `max E[Π] - λ × CVaR_α(-Π)` where `CVaR_α` is the mean of sufficiently bad losses (with the correct loss sign and a linear epigraph formulation). Realized profit after the fact uses the **actual** price path while keeping the pre-auction schedule fixed.
 
-## Sources (verified documentation / published research)
+The exact choice of `λ`, tail level, and optimizer should be published before comparing results. Use a tested linear/MILP solver through a suitable Python package (e.g. SciPy HiGHS optimization), not scikit-learn to solve energy dispatch.
 
-1. Hilger, H., et al. (2024), *Multivariate scenario generation of day-ahead electricity prices using normalizing flows*, Applied Energy 367, 123241. Section 3.4 describes the informed historical / kNN scenario baseline: https://doi.org/10.1016/j.apenergy.2024.123241 ; open-access PDF: https://discovery.ucl.ac.uk/10212406/1/1-s2.0-S030626192400624X-main.pdf
-2. European Commission (2025-10-01), *EU electricity trading in the day-ahead markets becomes more dynamic*: https://energy.ec.europa.eu/news/eu-electricity-trading-day-ahead-markets-becomes-more-dynamic-2025-10-01_en
-3. Fraunhofer ISE, Energy-Charts API catalogue and licence information: https://api.energy-charts.info/ ; /v2/price endpoint.
-4. scikit-learn, `NearestNeighbors`: https://scikit-learn.org/stable/modules/generated/sklearn.neighbors.NearestNeighbors.html
-5. scikit-learn, `HistGradientBoostingRegressor` quantile-loss documentation: https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.HistGradientBoostingRegressor.html
-6. DST switch on 2026-10-25: https://www.timeanddate.com/time/change/germany/berlin?year=2026
+## Evaluation
+
+- Day-by-day walk-forward / held-out comparison of **realized EUR profit**, risk (bad-day tail losses, CVaR), charge/discharge and SOC trajectories, throughput, and total degradation.
+- Quantile forecast calibration (pinball loss and actual coverage), and scenario-path diagnostics: spikes, negative prices, intraday day spread, residual autocorrelation and daily dynamics.
+- Plot distributions and daily realized profit with `matplotlib`, manipulate data with `pandas`/`numpy`, train forecasts with `scikit-learn`.
+- Do not call the perfect-foresight result actual achievable economic profit. It is an **oracle upper bound for a fixed, simplified dispatch formulation**.
+- Do not promise stochastic outperforming deterministic: differences depend on calibration, uncertainty, risk aversion, and realized price paths.
+
+## Proposed small project layout (not yet implemented)
+
+- `data.py`: API fetching / source validation / datetime and DST.
+- `scenarios.py`: `scikit-learn` conditional quantile forecast and daily-vector residual bootstrap.
+- `battery.py`: common physical BESS model and three objective definitions.
+- `compare.py`: chronological out-of-sample experiment, summary metrics, matplotlib plots.
+- `requirements.txt`: `numpy`, `pandas`, `matplotlib`, `scikit-learn`, HTTP client, and selected optimizer dependency.
+- `README.md`: how to reproduce data, train, run and inspect outputs.
+
+**Next technical dependencies:** Verify public market-price retrieval and choose illustrative BESS specs, risk coefficient, optimizer and archived features before claiming an executable result.
+
+## Sources
+
+1. European Commission (2025-10-01), 15-minute EU day-ahead market time unit: https://energy.ec.europa.eu/news/eu-electricity-trading-day-ahead-markets-becomes-more-dynamic-2025-10-01_en
+2. Fraunhofer ISE Energy-Charts API: https://api.energy-charts.info/
+3. scikit-learn quantile boosting: https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.HistGradientBoostingRegressor.html
+4. Hilger et al., *Multivariate scenario generation of day-ahead electricity prices using normalizing flows*, Applied Energy 367 (2024), 123241. Provides a benchmark using informed historical nearest neighbours, not validation for this exact residual-bootstrap combination: https://doi.org/10.1016/j.apenergy.2024.123241
