@@ -31,7 +31,7 @@ class PriceRiskAuditTests(unittest.TestCase):
         """قیمت واقعی بسیار منفی باید بیرون دم پایین سناریو ثبت شود."""
 
         # قیمت واقعی منفیِ شدید در بازهٔ سومِ روز دیده شده است.
-        actual = np.array([[10., 8., -100.]])
+        actual = np.array([[10., 10., -100.]])
         usual = np.array([9., 10., 11.])
         paths = np.repeat(usual[None, None, :], repeats=50, axis=1)
         result = risk_metrics(actual, paths, -50., 50.)
