@@ -1,6 +1,6 @@
 # BESS — approved DE–LU day-ahead research design (v0.5)
 
-**Status (2026-11-06): the full historical DE-LU day-ahead PRICE dataset has been downloaded and passed time-series completeness checks on GitHub Actions.** Run **42305243042** obtained **38,020 quarter-hour rows** for **2025-10-01 through 2026-10-31**, each month checked individually, and saved monthly CSVs and a combined CSV as a downloadable Actions artifact. The six synthetic-code unit tests also passed. **This validates timestamp/coverage checks, not forecast quality, asset-level operational behavior, or price-market revisions.** No measured Bollingstedt quarter-hour dispatch or SOC dataset has been imported, no quantile model has been trained, and no optimizer/performance backtest has been run.
+**Status (2026-11-06): 13 months of real DE-LU prices have been downloaded and a first 50-scenario one-day forecasting prototype has run.** Historical price download run **42305243042** contains **38,020** validated quarter-hour records for **2025-10-01 to 2026-10-31**. Forecast run **42306547577** built 50 paths for 2026-10-15 using prior training history, chronological out-of-sample whole-day residuals and a fixed random seed. **Important: the 10th–90th quantile interval covered only 50.2% of validation observations vs ~80% nominal; these forecast scenarios are a working *prototype*, NOT sufficiently calibrated for reliable risk/dispatch conclusions.** No measured Bollingstedt quarter-hour dispatch or SOC dataset has been imported and no battery MILP/performance backtest has been run.
 
 ## Approved provisional operating assumptions (user decision, 2026-11-06)
 
@@ -38,6 +38,17 @@ Real-world auction bids may be price-contingent and have more complex acceptance
 - **API rate limiting:** initial run failed with HTTP 429 in March 2026. The re-run used 15-second inter-request spacing and a controlled retry after one 429 for February; all months then passed and were stored.
 - **Train/test split for next stage:** 2025-10 to 2026-09 for chronological model fitting and residual validation; 2026-10 **strictly held out** for performance measurement. Never use October 2026 prices to train or generate October pre-auction forecasts.
 - **Important limitations:** the artifact contains **market price**, not actual site power/SOC; the program verifies coverage and structural validity but not official historical revisions, source licensing, forecasting leakage or dispatch behavior. No scenario generator or battery MILP has been executed yet.
+
+## First scenario-generation run — executable prototype, calibration NOT accepted
+
+- **Successful GitHub Actions run:** https://github.com/SaeedAkbare/BESS/actions/runs/42306547577
+- **50-path quarter-hour CSV (2026-10-15):** https://github.com/SaeedAkbare/BESS/actions/runs/42306547577/artifacts/13546357238
+- **Simple code with Persian comments:** [`scenarios.py`](scenarios.py), [`test_scenarios.py`](test_scenarios.py), [`test_scenarios.yml`](.github/workflows/test_scenarios.yml).
+- **Method:** sklearn quantile HGB regressors (q10/q50/q90), calendar + previously published prior-day DA price summaries as pre-auction features, four expanding temporal validation folds (Feb–Sep 2026), whole-day normalized out-of-sample error vectors resampled with seed 42. **241** usable ordinary-day residual trajectories were logged, with **50** equally weighted Monte Carlo draws for the held-out ordinary day 2026-10-15 (**96** intervals).
+- **Critical empirical limitation:** q10–q90 validation coverage **0.502**, well below the **0.80 nominal** target. This shows **underestimated uncertainty/miscalibration**. The fact that CSV files were generated does **not** imply good probabilistic scenarios, accurate trading signals, or economically reliable stochastic optimization. Improve/validate calibration out of sample **before** making any performance/risk claims, especially tail CVaR; consider longer calibration windows, stronger ex-ante features, and/or calibrated residual scaling.
+- **DST scope:** current scenario prototype intentionally rejects delivery days with 92 or 100 intervals; they are present in the raw dataset but not yet valid scenario targets. Do not silently force 96 intervals on DST days.
+- **Data timing:** October 2026 prices are held out for training and residual pools; prior delivery-day **published day-ahead prices** can be available before the D-1 auction for the target. No same-day price enters features or the scenario output. Future tests must check publication/issue-time eligibility for every exogenous feature and retraining schedule.
+- **Next quality gate:** demonstrate credible out-of-sample predictive interval coverage (near nominal, with an independently separated validation interval) and daily path dependence before relying on generated scenarios in the risk-aware MILP. The code's unit tests address mechanics, not statistical calibration.
 
 ## Actual market data and timestamps
 
