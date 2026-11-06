@@ -6,6 +6,7 @@ on:
   push:
     paths:
       - ".github/workflows/fetch_history.yml"
+      - "history.py"
   workflow_dispatch:
 
 # فقط خواندن مخزن؛ هیچ فایل داده‌ای خودکار کامیت نمی‌شود.
@@ -38,10 +39,11 @@ jobs:
       - name: Fetch historical prices
         run: python history.py
 
-      # ذخیرهٔ CSV فقط پس از دانلود و اعتبارسنجی موفق.
-      - name: Save CSV artifact
+      # حتی اگر ماه بعدی با خطا متوقف شود، ماه‌های معتبر قبلی حفظ می‌شوند.
+      - name: Save validated CSV files
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: DE-LU-prices-2025-10-through-2026-10
-          path: prices_DE-LU_2025-10_to_2026-10.csv
-          if-no-files-found: error
+          name: DE-LU-validated-months
+          path: output/
+          if-no-files-found: warn
