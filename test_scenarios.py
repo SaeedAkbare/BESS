@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 # فقط توابعِ قابل آزمایش را وارد می‌کنیم.
-from scenarios import prepare, sample_scenarios
+from scenarios import prepare, sample_scenarios, calibration_gap, coverage_rate
 
 
 class ScenarioTests(unittest.TestCase):
@@ -33,6 +33,30 @@ class ScenarioTests(unittest.TestCase):
         # اجرای دوباره با همان بذر باید دقیقاً یکسان باشد.
         other = sample_scenarios(median, low, high, paths, count=20, seed=7)
         np.testing.assert_array_equal(result, other)
+
+    def test_calibration_gap_uses_only_known_errors(self):
+        """حاشیهٔ کالیبراسیون باید پوشش نمونهٔ تاریخی را زیاد کند."""
+
+        # چهار قیمت فرضی داریم که دو مورد بیرون از بازهٔ خام‌اند.
+        true_price = np.array([5., 10., 15., 20.])
+        lower = np.array([7., 7., 7., 7.])
+        upper = np.array([18., 18., 18., 18.])
+        gap = calibration_gap(true_price, lower, upper, target_coverage=0.75)
+        self.assertEqual(gap, 2.0)
+        self.assertGreaterEqual(
+            coverage_rate(true_price, lower - gap, upper + gap), 0.75
+        )
+
+    def test_calibration_does_not_mutate_predictions(self):
+        """محاسبهٔ حاشیه نباید قیمت‌ها یا حدهای اولیه را دستکاری کند."""
+
+        actual = np.array([5., 20.])
+        low = np.array([7., 7.])
+        high = np.array([18., 18.])
+        old_low, old_high = low.copy(), high.copy()
+        calibration_gap(actual, low, high)
+        np.testing.assert_array_equal(low, old_low)
+        np.testing.assert_array_equal(high, old_high)
 
     def test_previous_day_feature_does_not_see_target_price(self):
         """خلاصهٔ قیمت روز هدف نباید در ویژگی همان روز وارد شود."""
