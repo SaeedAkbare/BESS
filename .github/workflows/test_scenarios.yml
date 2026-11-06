@@ -1,0 +1,64 @@
+# اجرای آزمایشی سناریوسازی با دادهٔ واقعیِ دانلودشده در اجرای موفق قبلی.
+name: Test one-day price scenarios
+
+# تغییر در کد یا تعریف Workflow یک بار آن را اجرا می‌کند.
+on:
+  push:
+    paths:
+      - ".github/workflows/test_scenarios.yml"
+      - "scenarios.py"
+      - "test_scenarios.py"
+  workflow_dispatch:
+
+# برای گرفتن خروجیِ اجرای قبلی، دسترسی خواندن Actions لازم است.
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  scenarios:
+    runs-on: ubuntu-latest
+    steps:
+      # دریافت کدهای سادهٔ پروژه.
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # تنظیم پایتون.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # نصب pandas، requests و scikit-learn.
+      - name: Install Python packages
+        run: python -m pip install -r requirements.txt
+
+      # آزمون حفظ مسیر روزانه، عدم نشت و تغییر ساعت.
+      - name: Run unit tests
+        run: python -m unittest -v test_data test_scenarios
+
+      # همان فایل ۱۳ماههٔ واقعی و بررسی‌شده را از اجرای موفق قبلی می‌گیریم.
+      - name: Download validated historical data
+        uses: actions/download-artifact@v4
+        with:
+          name: DE-LU-validated-months
+          run-id: 42305243042
+          repository: ${{ github.repository }}
+          github-token: ${{ github.token }}
+          path: input/
+
+      # فقط برای یک روز معمولیِ اکتبر ۲۰۲۶ سناریو می‌سازیم.
+      - name: Generate 50 day-ahead scenarios
+        run: |
+          python scenarios.py \
+            --input input/prices_DE-LU_2025-10_to_2026-10.csv \
+            --date 2026-10-15 \
+            --output output/scenarios_2026-10-15.csv
+
+      # خروجی شامل قیمت سناریوهاست؛ قیمت واقعی روز آزمون وارد آن نمی‌شود.
+      - name: Save scenario CSV
+        uses: actions/upload-artifact@v4
+        with:
+          name: DE-LU-50-scenarios-2026-10-15
+          path: output/scenarios_2026-10-15.csv
+          if-no-files-found: error
