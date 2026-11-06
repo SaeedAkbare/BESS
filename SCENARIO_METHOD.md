@@ -1,6 +1,6 @@
 # BESS — approved DE–LU day-ahead research design (v0.5)
 
-**Status (2026-11-06): project design approved; industrial-practice audit added; this file contains specifications, NOT executed results.** No verified API download, trained forecast, optimizer run, or measured performance is claimed.
+**Status (2026-11-06): method is specified; one-day market-price acquisition/validation has now run successfully on GitHub Actions.** Exactly **100 validated 15-minute DE-LU market-price intervals** for delivery day **2026-10-25** were fetched via the documented Energy-Charts `/price` endpoint. Six automated tests passed, and a one-day CSV artifact was uploaded. **No full historical dataset has been downloaded, no BESS operational time series has been fetched, no quantile model has been trained, and no optimizer/performance backtest has been run.**
 
 ## Approved provisional operating assumptions (user decision, 2026-11-06)
 
@@ -20,11 +20,20 @@ Compare the **same battery** over historical Germany–Luxembourg (DE-LU) day-ah
 
 Real-world auction bids may be price-contingent and have more complex acceptance, clearing, and product constraints. v0.2 uses an explicitly simplified **price-taker, fixed pre-auction schedule** for an apples-to-apples educational benchmark. It does not simulate the auction clearing mechanism, execution risks, intraday corrections, or imbalance settlements.
 
+## First real data check — GitHub Actions, verified 2026-11-06
+
+- GitHub Actions run **completed successfully**: https://github.com/SaeedAkbare/BESS/actions/runs/42304420229
+- [Validated one-day CSV artifact](https://github.com/SaeedAkbare/BESS/actions/runs/42304420229/artifacts/13546180518) (stored as an Actions artifact, **not committed to the repository**).
+- Code: [`data.py`](data.py) (small downloader with Persian line/function comments), [`test_data.py`](test_data.py) (six unit tests), and [`check_prices.yml`](.github/workflows/check_prices.yml) (CI workflow).
+- The run printed: **`100` valid intervals saved** for 2026-10-25 (Berlin fall-DST day); all six tests passed.
+- Initial test failures were useful and **fixed**: compare DST timestamps in UTC and accept the actual API unit spelling `EUR / MWh` in addition to `EUR/MWh`.
+- **Caution:** this success establishes access and schema/completeness for *one delivery day only*. It is not evidence that the entire proposed training/test period is available, complete, or free of revisions. Retrieve a longer history and test day-by-day before claiming a full backtest dataset.
+
 ## Actual market data and timestamps
 
 - Bidding zone: **DE–LU**; settlement price **EUR/MWh**.
 - Day-ahead resolution from 2025-10-01 is **15-minute MTU**: normally 96 slots/day. Treat timestamps as timezone-aware `Europe/Berlin`; DST changeover days can contain 92 or 100 slots (October 25, 2026 has 100). Define the optimizer horizon dynamically instead of assuming 96 always.
-- Data candidate: Fraunhofer ISE Energy-Charts API `https://api.energy-charts.info/v2/price?bzn=DE-LU&start=2026-10-01&end=2026-10-31`; endpoint, timestamps, schema and actual historical completeness **must be verified by an actual fetch** before implementation is claimed. Retain source and licensing attribution.
+- Data candidate: Fraunhofer ISE Energy-Charts API `https://api.energy-charts.info/v2/price?bzn=DE-LU&start=2026-10-01&end=2026-10-31`; the **one-day** endpoint/schema was successfully tested with GitHub Actions on 2026-11-06; **full-period** coverage and possible API revisions still require checking. Retain source and licensing attribution.
 - For initial backtest: hold out **October 2026**. Fit parameters only using past data, e.g. Oct 2025–Sep 2026, then test day-by-day on Oct 2026 in a reproducible out-of-sample procedure. The tested day must never appear in fitted features, residuals, or calibration data.
 - Use only ex-ante-known covariates at forecast issue time: calendar, eligible lagged day-ahead prices, and if accessible *archived forecasts* for wind, solar and load. **Do not leak actual next-day demand or generation.**
 
