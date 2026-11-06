@@ -1,0 +1,47 @@
+# دریافت قیمت‌های تاریخیِ واقعی برای آموزش و ارزیابی BESS.
+name: Download DE-LU price history
+
+# وقتی این Workflow ساخته/ویرایش شود یک بار اجرا می‌شود.
+on:
+  push:
+    paths:
+      - ".github/workflows/fetch_history.yml"
+  workflow_dispatch:
+
+# فقط خواندن مخزن؛ هیچ فایل داده‌ای خودکار کامیت نمی‌شود.
+permissions:
+  contents: read
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    steps:
+      # دریافت فایل‌های برنامه.
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # نصب پایتون.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # نصب کتابخانه‌های موردنیاز.
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      # تست تغییر ساعت و خطاهای داده قبل از دریافت واقعی.
+      - name: Test validation
+        run: python -m unittest -v test_data
+
+      # دانلود ماه‌به‌ماه؛ هر ماهِ ناقص باعث توقف کل مرحله می‌شود.
+      - name: Fetch historical prices
+        run: python history.py
+
+      # ذخیرهٔ CSV فقط پس از دانلود و اعتبارسنجی موفق.
+      - name: Save CSV artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DE-LU-prices-2025-10-through-2026-10
+          path: prices_DE-LU_2025-10_to_2026-10.csv
+          if-no-files-found: error
