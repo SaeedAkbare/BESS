@@ -12,12 +12,11 @@ import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 
 
-# چهار بازهٔ اعتبارسنجی زمانی؛ آموزشِ هر بازه فقط با گذشتهٔ همان بازه است.
+# سه بازهٔ گذشته برای کالیبراسیون؛ سپتامبر را برای آزمون مستقل نگه می‌داریم.
 FOLDS = [
     ("2026-02-01", "2026-04-01"),
     ("2026-04-01", "2026-06-01"),
-    ("2026-06-01", "2026-08-01"),
-    ("2026-08-01", "2026-10-01"),
+    ("2026-06-01", "2026-09-01"),
 ]
 FEATURES = ["sin_hour", "cos_hour", "sin_year", "cos_year",
             "weekday", "prev_mean", "prev_min", "prev_max"]
@@ -94,41 +93,100 @@ def scale_residual(actual, lower, middle, upper):
     return np.where(error >= 0, error / positive_spread, error / negative_spread)
 
 
+def calibration_gap(actual, lower, upper, target_coverage=0.80):
+    """حاشیهٔ اضافی بازه را فقط از خطاهای خارج از نمونهٔ گذشته پیدا می‌کند."""
+
+    # هر مشاهده نشان می‌دهد چقدر از مرز q10–q90 بیرون افتاده است.
+    scores = np.maximum.reduce([lower - actual, actual - upper,
+                                np.zeros(len(actual))])
+    # چندک تصحیح‌شدهٔ split conformal؛ فقط روی گذشته محاسبه می‌شود.
+    rank = min(len(scores) - 1, int(np.ceil((len(scores) + 1) * target_coverage)) - 1)
+    return float(np.sort(scores)[rank])
+
+
+def coverage_rate(actual, lower, upper):
+    """سهم قیمت‌های واقعی درون بازه را محاسبه می‌کند."""
+
+    return float(np.mean((actual >= lower) & (actual <= upper)))
+
+
 def past_residual_days(table):
-    """باقیمانده‌های خارج از نمونه را از دوره‌های اعتبارسنجیِ زمانی می‌سازد."""
+    """با Foldهای زمانی، خطای روزانه و حاشیهٔ کالیبراسیون را می‌سازد."""
 
-    days = []
-    actual_all, low_all, high_all = [], [], []
-
+    # دادهٔ فوریه تا اوت برای کالیبراسیون؛ سپتامبر را نمی‌بینیم.
+    parts = []
     for start, end in FOLDS:
-        start_day, end_day = date.fromisoformat(start), date.fromisoformat(end)
-        train = table[table["day"] < start_day]
-        valid = table[(table["day"] >= start_day) & (table["day"] < end_day)]
+        first, last = date.fromisoformat(start), date.fromisoformat(end)
+        train = table[table["day"] < first]
+        valid = table[(table["day"] >= first) & (table["day"] < last)].copy()
         if len(train) < 2000 or valid.empty:
             raise ValueError("دادهٔ تاریخی کافی برای اعتبارسنجی زمانی نیست.")
 
-        # در این Fold، حتی یک ردیف از آینده وارد آموزش نمی‌شود.
+        # مدل هر Fold فقط از ماه‌های قبل از آن Fold آموزش می‌بیند.
         lower, middle, upper = predict(fit_quantiles(train), valid)
-        actual = valid["price_eur_mwh"].to_numpy()
-        scaled = scale_residual(actual, lower, middle, upper)
+        valid["lower"], valid["middle"], valid["upper"] = lower, middle, upper
+        parts.append(valid)
 
-        # همهٔ بازه‌های این دوره را برای پوشش چندکیِ مستقل نگه می‌داریم.
-        actual_all.extend(actual)
-        low_all.extend(lower)
-        high_all.extend(upper)
+    # باقیمانده‌های «واقعاً خارج از نمونه» را کنار هم می‌گذاریم.
+    past = pd.concat(parts, ignore_index=True)
+    actual = past["price_eur_mwh"].to_numpy()
+    lower = past["lower"].to_numpy()
+    middle = past["middle"].to_numpy()
+    upper = past["upper"].to_numpy()
+    raw_coverage = coverage_rate(actual, lower, upper)
 
-        # باقیمانده‌های یک روز را یکجا حفظ می‌کنیم؛ بازه‌ها مستقل نمونه‌گیری نمی‌شوند.
-        valid = valid.assign(residual=scaled)
-        for _, one_day in valid.groupby("day", sort=True):
-            if len(one_day) == 96:  # فقط با روز ۹۶بازه‌ای تطبیق مستقیم داریم.
-                days.append(one_day["residual"].to_numpy())
+    # فقط همین بازهٔ کالیبراسیون می‌تواند اندازهٔ حاشیه را تعیین کند.
+    gap = calibration_gap(actual, lower, upper)
+    calibrated_coverage = coverage_rate(actual, lower - gap, upper + gap)
 
-    # باید حداقل ۵۰ روز تاریخیِ مستقل داشته باشیم.
+    # خطای نرمال‌شده نسبت به بازهٔ جدید را برای کل مسیرهای روزانه می‌سازیم.
+    # پهنای بازه در روز هدف نیز همین‌طور اصلاح خواهد شد.
+    past["residual"] = scale_residual(actual, lower - gap, middle, upper + gap)
+    days = []
+    for _, one_day in past.groupby("day", sort=True):
+        if len(one_day) == 96:
+            days.append(one_day["residual"].to_numpy())
+
+    # نمونه‌گیری روزانه باید روی تعداد کافی از روزهای گذشته باشد.
     if len(days) < 50:
         raise ValueError("کمتر از ۵۰ روز باقیماندهٔ تاریخی معتبر داریم.")
-    coverage = np.mean((np.array(actual_all) >= np.array(low_all)) &
-                       (np.array(actual_all) <= np.array(high_all)))
-    return np.array(days), coverage
+    return np.array(days), gap, raw_coverage, calibrated_coverage
+
+
+def independent_september_check(table, residuals, gap):
+    """بدون تنظیم دوبارهٔ پارامتر، کیفیت کالیبراسیون را روی سپتامبر می‌سنجد."""
+
+    # سپتامبر هرگز در Foldهای بالا یا محاسبهٔ gap وارد نشده است.
+    first, last = date(2026, 9, 1), date(2026, 10, 1)
+    train = table[table["day"] < first]
+    valid = table[(table["day"] >= first) & (table["day"] < last)]
+    lower, middle, upper = predict(fit_quantiles(train), valid)
+    actual = valid["price_eur_mwh"].to_numpy()
+
+    # دو معیار: پوشش بازهٔ اصلی و پوشش بازهٔ کالیبره‌شده.
+    before = coverage_rate(actual, lower, upper)
+    after = coverage_rate(actual, lower - gap, upper + gap)
+
+    # ۵۰ سناریو برای هر روز معمولی می‌سازیم و پوشش تجربی آن‌ها را می‌سنجیم.
+    valid = valid.assign(lower=lower, middle=middle, upper=upper)
+    total_inside, total_points, n_days = 0, 0, 0
+    for day, one_day in valid.groupby("day", sort=True):
+        if len(one_day) != 96:
+            continue
+        paths = sample_scenarios(
+            one_day["middle"].to_numpy(),
+            one_day["lower"].to_numpy() - gap,
+            one_day["upper"].to_numpy() + gap,
+            residuals, seed=42 + n_days,
+        )
+        band10, band90 = np.quantile(paths, [0.1, 0.9], axis=0)
+        actual_day = one_day["price_eur_mwh"].to_numpy()
+        total_inside += int(((actual_day >= band10) & (actual_day <= band90)).sum())
+        total_points += len(one_day)
+        n_days += 1
+    if total_points == 0:
+        raise ValueError("روز قابل‌ارزیابی در سپتامبر پیدا نشد.")
+    return before, after, total_inside / total_points, n_days
 
 
 def sample_scenarios(median, lower, upper, historical_days, seed=42, count=50):
@@ -169,11 +227,16 @@ def main():
     if len(test) != 96:
         raise ValueError("نسخهٔ اولیه فقط روز عادی ۹۶بازه‌ای را می‌پذیرد.")
 
-    # این خطاها فقط از پیش‌بینی‌های خارج از نمونهٔ گذشته به دست می‌آیند.
-    residuals, coverage = past_residual_days(train)
+    # کالیبراسیون فقط با فوریه تا اوت؛ سپتامبر برای آزمون مستقل محفوظ است.
+    residuals, gap, raw_calib, fixed_calib = past_residual_days(train)
+    raw_sep, fixed_sep, scenario_sep, sep_days = independent_september_check(
+        train, residuals, gap
+    )
 
-    # پیش‌بینی روز هدف از مدلِ آموزش‌دیده فقط تا سپتامبر است.
+    # پس از آزمون مستقل سپتامبر، مدل نهایی تا پایان سپتامبر آموزش می‌بیند.
+    # قیمت‌های اکتبر ۲۰۲۶ وارد آموزش یا کالیبراسیون نمی‌شوند.
     lower, middle, upper = predict(fit_quantiles(train), test)
+    lower, upper = lower - gap, upper + gap
     scenarios = sample_scenarios(middle, lower, upper, residuals)
 
     # قیمت واقعی روز آزمون را در خروجی قرار نمی‌دهیم تا نشت اطلاعات رخ ندهد.
@@ -189,9 +252,13 @@ def main():
     result.to_csv(args.output, index=False)
     print(f"روز آزمون: {target}، تعداد بازه‌ها: {len(test)}")
     print(f"روزهای باقیماندهٔ خارج از نمونه: {len(residuals)}")
-    print(f"پوشش تجربی بازهٔ q10 تا q90 در اعتبارسنجی: {coverage:.3f}")
+    print(f"حاشیهٔ کالیبراسیون از فوریه تا اوت: {gap:.2f} یورو/MWh")
+    print(f"پوشش همان دوره قبل/بعد از اصلاح: {raw_calib:.3f} / {fixed_calib:.3f}")
+    print(f"آزمون مستقل سپتامبر ({sep_days} روز)، پوشش قبل/بعد: "
+          f"{raw_sep:.3f} / {fixed_sep:.3f}")
+    print(f"پوشش بازهٔ تجربی ۱۰–۹۰٪ سناریوها در سپتامبر: {scenario_sep:.3f}")
     print(f"۵۰ سناریو با وزن برابر ۱/۵۰ ساخته شد: {args.output}")
-    print("هشدار: پوشش تجربی و سناریوها هنوز اعتبارسنجی کامل اقتصادی نشده‌اند.")
+    print("نکته: کالیبراسیون حاشیه‌ای تضمین CVaR یا اعتبار اقتصادی نمی‌دهد.")
 
 
 if __name__ == "__main__":
