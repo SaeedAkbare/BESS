@@ -1,7 +1,7 @@
-"""ساخت ۵۰ سناریوی قیمت Day-Ahead با رگرسیون چندکی و بوت‌استرپِ کل روز.
+"""Generate 50 day-ahead price scenarios using quantile regression and daily bootstrap.
 
-فقط برای روزهای معمولی ۹۶ بازه‌ای. برای روزهای ۹۲/۱۰۰ بازه‌ای فعلاً خطا می‌دهیم.
-قیمت‌های اکتبر ۲۰۲۶ هرگز برای آموزش یا ساختِ باقیمانده‌ها استفاده نمی‌شوند.
+Supports regular 96-interval days only; 92/100-interval days currently raise an error.
+October 2026 prices are never used for model training or residual construction.
 """
 import argparse
 from datetime import date, timedelta
@@ -12,7 +12,7 @@ import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 
 
-# سه بازهٔ گذشته برای کالیبراسیون؛ سپتامبر را برای آزمون مستقل نگه می‌داریم.
+# Three historical folds for calibration; September is reserved for separate evaluation.
 FOLDS = [
     ("2026-02-01", "2026-04-01"),
     ("2026-04-01", "2026-06-01"),
@@ -23,20 +23,20 @@ FEATURES = ["sin_hour", "cos_hour", "sin_year", "cos_year",
 
 
 def prepare(csv_file):
-    """CSV واقعی را به جدولِ قیمت و ویژگی‌های قابل دانستن قبل از حراج تبدیل می‌کند."""
+    """Convert validated price CSV to features available before the day-ahead auction."""
 
-    # همهٔ زمان‌ها را ابتدا در UTC می‌خوانیم تا ساعت تکراری پاییز مشکلی نسازد.
+    # Parse UTC timestamps first to handle the repeated autumn clock hour.
     df = pd.read_csv(csv_file)
     df["timestamp_utc"] = pd.to_datetime(df["timestamp_utc"], utc=True)
     df = df.sort_values("timestamp_utc").reset_index(drop=True)
     if df["timestamp_utc"].duplicated().any():
-        raise ValueError("زمان تکراری در فایل قیمت وجود دارد.")
+        raise ValueError("Duplicate timestamps in the price file.")
 
     df["price_eur_mwh"] = pd.to_numeric(df["price_eur_mwh"], errors="coerce")
     if df["price_eur_mwh"].isna().any():
-        raise ValueError("قیمت نامعتبر یا خالی وجود دارد.")
+        raise ValueError("Missing or invalid prices.")
 
-    # تاریخِ تحویل و ساعت محلی را به وقت برلین استخراج می‌کنیم.
+    # Derive delivery dates and local hours in Europe/Berlin.
     local = df["timestamp_utc"].dt.tz_convert("Europe/Berlin")
     df["day"] = local.dt.date
     hour = local.dt.hour + local.dt.minute / 60
@@ -47,19 +47,19 @@ def prepare(csv_file):
     df["cos_year"] = np.cos(2 * np.pi * year_day / 365.25)
     df["weekday"] = local.dt.dayofweek
 
-    # خلاصهٔ قیمت «روز قبل» در زمانِ حراج امروز از قبل منتشر شده است.
+    # Previous-day price summaries are known before the current auction.
     daily = df.groupby("day")["price_eur_mwh"].agg(["mean", "min", "max"])
-    previous = daily.shift(1)  # از قیمت خودِ روز هدف استفاده نمی‌کنیم.
+    previous = daily.shift(1)  # Never use prices from the target day.
     for feature, column in [("prev_mean", "mean"), ("prev_min", "min"),
                             ("prev_max", "max")]:
         df[feature] = df["day"].map(previous[column])
 
-    # روز نخست، تاریخچهٔ روز قبل را در این فایل ندارد؛ حذفش می‌کنیم.
+    # Drop the first day because its previous-day features are unavailable.
     return df.dropna(subset=FEATURES).copy()
 
 
 def fit_quantiles(train):
-    """سه مدل کوچک sklearn برای چندک‌های ۱۰، ۵۰ و ۹۰ درصد می‌سازد."""
+    """Fit three small sklearn quantile models at 10%, 50%, and 90%."""
 
     models = {}
     for quantile in (0.1, 0.5, 0.9):
@@ -74,7 +74,7 @@ def fit_quantiles(train):
 
 
 def predict(models, rows):
-    """پیش‌بینی‌ها را مرتب می‌کند تا چندک پایین از میانه بالاتر نباشد."""
+    """Order quantile predictions so the lower bound cannot exceed the median."""
 
     x = rows[FEATURES]
     middle = models[0.5].predict(x)
@@ -84,9 +84,9 @@ def predict(models, rows):
 
 
 def scale_residual(actual, lower, middle, upper):
-    """خطای مثبت/منفی را با پهنای چندکی مناسب نرمال می‌کند."""
+    """Normalize positive and negative errors by the corresponding quantile spread."""
 
-    # کف ۱ یورو/MWh مانع تقسیم بر صفر در قیمت‌های کم‌نوسان می‌شود.
+    # A 1 EUR/MWh floor prevents division by zero in low-volatility periods.
     error = actual - middle
     positive_spread = np.maximum(upper - middle, 1.0)
     negative_spread = np.maximum(middle - lower, 1.0)
@@ -94,18 +94,18 @@ def scale_residual(actual, lower, middle, upper):
 
 
 def score_quantile(scores, target_coverage=0.80):
-    """صدک تجربیِ خطاهای قبلی با اصلاح تعداد نمونه را برمی‌گرداند."""
+    """Return a finite-sample-adjusted empirical quantile of prior scores."""
 
     scores = np.asarray(scores)
     if len(scores) == 0:
-        raise ValueError("هیچ خطای قبلی برای کالیبراسیون وجود ندارد.")
-    # رتبهٔ صدک تنها با مشاهده‌های گذشته تعیین می‌شود.
+        raise ValueError("No prior calibration scores are available.")
+    # Determine the quantile rank using only past observations.
     rank = min(len(scores) - 1, int(np.ceil((len(scores) + 1) * target_coverage)) - 1)
     return float(np.sort(scores)[rank])
 
 
 def calibration_gap(actual, lower, upper, target_coverage=0.80):
-    """میزان بیرون‌زدگی قیمت از بازهٔ خام را با خطاهای واقعیِ گذشته می‌سنجد."""
+    """Measure deviations outside the raw price interval using past errors."""
 
     scores = np.maximum.reduce([lower - actual, actual - upper,
                                 np.zeros(len(actual))])
@@ -113,29 +113,29 @@ def calibration_gap(actual, lower, upper, target_coverage=0.80):
 
 
 def coverage_rate(actual, lower, upper):
-    """سهم قیمت‌های واقعی درون بازه را محاسبه می‌کند."""
+    """Calculate the fraction of observed prices within the interval."""
 
     return float(np.mean((actual >= lower) & (actual <= upper)))
 
 
 def past_residual_days(table):
-    """با Foldهای زمانی، خطای روزانه و حاشیهٔ کالیبراسیون را می‌سازد."""
+    """Construct daily residuals and calibration margins using temporal folds."""
 
-    # دادهٔ فوریه تا اوت برای کالیبراسیون؛ سپتامبر را نمی‌بینیم.
+    # Calibrate on February through August without using September.
     parts = []
     for start, end in FOLDS:
         first, last = date.fromisoformat(start), date.fromisoformat(end)
         train = table[table["day"] < first]
         valid = table[(table["day"] >= first) & (table["day"] < last)].copy()
         if len(train) < 2000 or valid.empty:
-            raise ValueError("دادهٔ تاریخی کافی برای اعتبارسنجی زمانی نیست.")
+            raise ValueError("Insufficient historical data for temporal validation.")
 
-        # مدل هر Fold فقط از ماه‌های قبل از آن Fold آموزش می‌بیند.
+        # Each fold trains only on months preceding that fold.
         lower, middle, upper = predict(fit_quantiles(train), valid)
         valid["lower"], valid["middle"], valid["upper"] = lower, middle, upper
         parts.append(valid)
 
-    # باقیمانده‌های «واقعاً خارج از نمونه» را کنار هم می‌گذاریم.
+    # Combine genuinely out-of-sample residuals.
     past = pd.concat(parts, ignore_index=True)
     actual = past["price_eur_mwh"].to_numpy()
     lower = past["lower"].to_numpy()
@@ -143,32 +143,32 @@ def past_residual_days(table):
     upper = past["upper"].to_numpy()
     raw_coverage = coverage_rate(actual, lower, upper)
 
-    # فقط همین بازهٔ کالیبراسیون می‌تواند اندازهٔ حاشیه را تعیین کند.
+    # Only this calibration period may determine the margin.
     gap = calibration_gap(actual, lower, upper)
     calibrated_coverage = coverage_rate(actual, lower - gap, upper + gap)
 
-    # خطای نرمال‌شده نسبت به بازهٔ جدید را برای کل مسیرهای روزانه می‌سازیم.
-    # پهنای بازه در روز هدف نیز همین‌طور اصلاح خواهد شد.
+    # Construct normalized errors for full daily paths using the adjusted interval.
+    # Apply the same interval-width adjustment on the target day.
     past["residual"] = scale_residual(actual, lower - gap, middle, upper + gap)
     days = []
     for _, one_day in past.groupby("day", sort=True):
         if len(one_day) == 96:
             days.append(one_day["residual"].to_numpy())
 
-    # نمونه‌گیری روزانه باید روی تعداد کافی از روزهای گذشته باشد.
+    # Daily bootstrap requires enough distinct historical days.
     if len(days) < 50:
-        raise ValueError("کمتر از ۵۰ روز باقیماندهٔ تاریخی معتبر داریم.")
-    # این جدول برای کالیبراسیون غلتان به‌کار می‌رود؛ فقط روزهای گذشته را دارد.
+        raise ValueError("Fewer than 50 valid historical residual days.")
+    # This table supports rolling calibration and contains only past days.
     past["score"] = np.maximum.reduce([lower - actual, actual - upper,
                                        np.zeros(len(actual))])
     return np.array(days), gap, raw_coverage, calibrated_coverage, past[["day", "score"]]
 
 
 def september_diagnostic(table, residuals, fixed_gap, past_scores):
-    """پوشش سپتامبر را با حاشیهٔ ثابت و کالیبراسیون غلتان مقایسه می‌کند.
+    """Compare September coverage under fixed and rolling calibration.
 
-    الگوریتم غلتان بعد از مشاهدهٔ نتیجهٔ روش ثابت طراحی شده است؛
-    پس سپتامبر دیگر آزمونِ کاملاً دست‌نخورده محسوب نمی‌شود.
+    The rolling method was designed after inspecting fixed-method results;
+    therefore September is no longer a pristine untouched test period.
     """
 
     first, last = date(2026, 9, 1), date(2026, 10, 1)
@@ -177,28 +177,28 @@ def september_diagnostic(table, residuals, fixed_gap, past_scores):
     lower, middle, upper = predict(fit_quantiles(train), valid)
     actual = valid["price_eur_mwh"].to_numpy()
 
-    # معیارهای روش قبلی را حفظ می‌کنیم تا مقایسه شفاف باشد.
+    # Retain previous-method metrics for a transparent comparison.
     before = coverage_rate(actual, lower, upper)
     after = coverage_rate(actual, lower - fixed_gap, upper + fixed_gap)
     valid = valid.assign(lower=lower, middle=middle, upper=upper)
 
-    # خطای تمام روزهای قبلی آماده است؛ روزهای سپتامبر تدریجاً اضافه می‌شوند.
+    # Historical errors are available; September days enter sequentially.
     errors = past_scores.copy()
     count_inside, total, scenarios_inside, n_days = 0, 0, 0, 0
-    # نسبت خطای واقعی به پهنای ۱۰–۹۰٪ سناریوها را برای تنظیم ماه بعد نگه می‌داریم.
+    # Track error-to-10-90-percentile-width ratios for next-month adjustment.
     risk_ratios = []
     for day, one_day in valid.groupby("day", sort=True):
         if len(one_day) != 96:
             continue
 
-        # در آغاز هر روز فقط خطاهای ۳۰ روز تقویمیِ پیش از آن مجازند.
+        # At each day start, use errors from the previous 30 calendar days only.
         recent = errors[(errors["day"] < day) &
                         (errors["day"] >= day - timedelta(days=30))]
         if len(recent) < 96 * 10:
-            raise ValueError("کمتر از ده روز خطای تاریخی در پنجرهٔ غلتان وجود دارد.")
+            raise ValueError("Fewer than ten historical error days in the rolling window.")
         day_gap = score_quantile(recent["score"].to_numpy())
 
-        # بازهٔ کالیبره‌شده را پیش از خواندن قیمت حقیقی همین روز تعیین می‌کنیم.
+        # Set calibrated bounds before observing this day's realized prices.
         lo = one_day["lower"].to_numpy()
         mid = one_day["middle"].to_numpy()
         hi = one_day["upper"].to_numpy()
@@ -206,13 +206,13 @@ def september_diagnostic(table, residuals, fixed_gap, past_scores):
         count_inside += int(((actual_day >= lo - day_gap) &
                              (actual_day <= hi + day_gap)).sum())
 
-        # پوشش تجربیِ صدک ۱۰ و ۹۰ سناریوها یک معیارِ مستقل از بازه است.
+        # Empirical 10th-to-90th scenario percentile coverage is a separate metric.
         paths = sample_scenarios(mid, lo - day_gap, hi + day_gap,
                                  residuals, seed=42 + n_days)
         band10, band90 = np.quantile(paths, [0.1, 0.9], axis=0)
         scenarios_inside += int(((actual_day >= band10) &
                                  (actual_day <= band90)).sum())
-        # میزان افزایش لازمِ سناریوهای مثبت و منفی نسبت به میانه.
+        # Determine positive and negative scenario expansion around the median.
         positive_width = np.maximum(band90 - mid, 1.0)
         negative_width = np.maximum(mid - band10, 1.0)
         ratios_day = np.where(actual_day >= mid,
@@ -222,7 +222,7 @@ def september_diagnostic(table, residuals, fixed_gap, past_scores):
         total += len(one_day)
         n_days += 1
 
-        # اکنون قیمت روز سپری‌شده مجاز است به تاریخچهٔ روز بعد اضافه شود.
+        # Once the day ends, its realized price may enter the next day's history.
         scores = np.maximum.reduce([lo - actual_day, actual_day - hi,
                                     np.zeros(len(actual_day))])
         errors = pd.concat([
@@ -230,47 +230,47 @@ def september_diagnostic(table, residuals, fixed_gap, past_scores):
         ], ignore_index=True)
 
     if total == 0:
-        raise ValueError("هیچ روز عادی در سپتامبر برای ارزیابی وجود ندارد.")
+        raise ValueError("No regular September days available for evaluation.")
 
-    # خطاهای کل سپتامبر در پایان ماه معلوم‌اند و برای پیش‌بینی اکتبر مجازند.
+    # September errors are known by month-end and can inform October forecasts.
     sep = errors[(errors["day"] >= first) & (errors["day"] < last)]
     gap_october = score_quantile(sep["score"].to_numpy())
-    # فقط پس از پایان سپتامبر، یک ضریب پهنا برای کل سناریوهای اکتبر تعیین می‌کنیم.
+    # Set one October scenario-width factor only after September ends.
     scenario_factor = max(1.0, score_quantile(np.array(risk_ratios)))
     return (before, after, count_inside / total, scenarios_inside / total,
             n_days, gap_october, scenario_factor)
 
 
 def sample_scenarios(median, lower, upper, historical_days, seed=42, count=50):
-    """۵۰ مسیر کاملِ روزانه را با نمونه‌گیری تصادفی از روزهای گذشته تولید می‌کند."""
+    """Sample 50 complete daily paths from historical daily residuals."""
 
     if historical_days.shape[1] != len(median):
-        raise ValueError("طول مسیرهای تاریخی و روز هدف متفاوت است.")
+        raise ValueError("Historical and target daily path lengths differ.")
 
-    # یک اندیس برای «کل روز» می‌کشیم، نه یک اندیس برای هر ساعت.
+    # Sample one index for an entire day, not separately for each hour.
     rng = np.random.default_rng(seed)
     selected = historical_days[rng.choice(len(historical_days), count, replace=True)]
     upper_spread = np.maximum(upper - median, 1.0)
     lower_spread = np.maximum(median - lower, 1.0)
 
-    # باقیمانده‌های نرمال‌شده را متناسب با عدم‌قطعیت روز جدید بازسازی می‌کنیم.
+    # Rescale normalized residuals to the new day's uncertainty.
     spreads = np.where(selected >= 0, upper_spread, lower_spread)
     return median + selected * spreads
 
 
 def evaluate_october(table, models, residuals, gap, factor):
-    """آزمون نهایی اکتبر: قیمت واقعی فقط پس از ساخت سناریو خوانده می‌شود."""
+    """October final evaluation: read actual prices only after scenarios exist."""
 
     october = table[(table["day"] >= date(2026, 10, 1)) &
                     (table["day"] <= date(2026, 10, 31))]
     in_band, in_scenarios, n, n_days = 0, 0, 0, 0
     for day, rows in october.groupby("day", sort=True):
-        # نسخهٔ فعلی روز تغییر ساعت پاییزیِ ۱۰۰ بازه‌ای را پشتیبانی نمی‌کند.
+        # The current implementation excludes the 100-interval autumn DST day.
         if len(rows) != 96:
             continue
         low, median, high = predict(models, rows)
         low, high = low - gap, high + gap
-        # از قیمت روز برای تولید مسیرها استفاده نشده است.
+        # Target-day prices were not used to construct scenarios.
         paths = sample_scenarios(median, low, high, residuals,
                                  seed=42 + n_days)
         paths = median + factor * (paths - median)
@@ -281,53 +281,53 @@ def evaluate_october(table, models, residuals, gap, factor):
         n += len(actual)
         n_days += 1
     if n == 0:
-        raise ValueError("هیچ روز عادی در اکتبر برای آزمون وجود ندارد.")
+        raise ValueError("No regular October days available for evaluation.")
     return in_band / n, in_scenarios / n, n_days
 
 
 def main():
-    """دادهٔ تاریخی را می‌خواند و سناریوهای یک روزِ اکتبر ۲۰۲۶ را ذخیره می‌کند."""
+    """Read history and save scenarios for one October 2026 day."""
 
-    parser = argparse.ArgumentParser(description="۵۰ سناریوی قیمت DE-LU با sklearn")
-    parser.add_argument("--input", required=True, help="CSV تاریخچهٔ تأییدشده")
-    parser.add_argument("--date", default="2026-10-15", help="روز آزمون YYYY-MM-DD")
+    parser = argparse.ArgumentParser(description="50 DE-LU price scenarios using sklearn")
+    parser.add_argument("--input", required=True, help="Validated historical CSV")
+    parser.add_argument("--date", default="2026-10-15", help="Evaluation day YYYY-MM-DD")
     parser.add_argument("--output", default="output/scenarios_2026-10-15.csv")
     args = parser.parse_args()
     target = date.fromisoformat(args.date)
 
-    # کل اکتبر از آموزش کنار گذاشته می‌شود؛ یک روز عادی را آزمایش می‌کنیم.
+    # Exclude all October data from training; evaluate one regular day.
     if not (date(2026, 10, 1) <= target <= date(2026, 10, 31)):
-        raise ValueError("برای آزمون فعلی، روز هدف باید در اکتبر ۲۰۲۶ باشد.")
+        raise ValueError("The evaluation date must be in October 2026.")
 
     table = prepare(args.input)
     cutoff = date(2026, 10, 1)
     train = table[table["day"] < cutoff]
     test = table[table["day"] == target]
     if len(test) != 96:
-        raise ValueError("نسخهٔ اولیه فقط روز عادی ۹۶بازه‌ای را می‌پذیرد.")
+        raise ValueError("Only regular 96-interval days are supported.")
 
-    # کالیبراسیون مقدماتی با فوریه تا اوت؛ سپتامبر ماه توسعه است.
+    # Initial calibration uses February through August; September is development data.
     residuals, gap, raw_calib, fixed_calib, past_scores = past_residual_days(train)
     raw_sep, fixed_sep, rolling_sep, scenario_sep, sep_days, october_gap, factor = (
         september_diagnostic(train, residuals, gap, past_scores)
     )
 
-    # مدل نهایی تا پایان سپتامبر آموزش می‌بیند؛ قیمت‌های اکتبر وارد آموزش نمی‌شوند.
+    # Final models train through September; October prices never enter training.
     models = fit_quantiles(train)
-    # معیارهای اکتبر فقط یک بار، بعد از قفل‌کردن ضریب‌ها، گزارش می‌شوند.
+    # Report October metrics only after calibration settings are fixed.
     october_band, october_paths, october_days = evaluate_october(
         table, models, residuals, october_gap, factor
     )
     lower, middle, upper = predict(models, test)
-    # حاشیهٔ نهایی فقط از خطاهای سپتامبر ۲۰۲۶ تعیین شده است.
+    # Final calibration margin is based on September 2026 errors only.
     lower, upper = lower - october_gap, upper + october_gap
     scenarios = sample_scenarios(middle, lower, upper, residuals)
-    # ضریبِ فقط-سپتامبر، پراکندگی همهٔ مسیرها را حول پیش‌بینی مرکزی افزایش می‌دهد.
+    # The September-derived factor widens paths around the central forecast.
     scenarios = middle + factor * (scenarios - middle)
     p10, p90 = np.quantile(scenarios, [0.1, 0.9], axis=0)
 
-    # این فایل فقط پیش‌بینی و سناریوست؛ قیمت واقعی روز هدف در آن نیست.
-    # «بازهٔ کالیبره» لزوماً چندک حقیقی q10/q90 نیست؛ نام درست می‌گذاریم.
+    # Output contains forecasts and scenarios, not actual target-day prices.
+    # A calibrated interval is not necessarily a true q10/q90 quantile interval.
     result = pd.DataFrame({
         "timestamp_utc": test["timestamp_utc"].dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "lower_calibrated": lower, "q50_forecast": middle, "upper_calibrated": upper,
@@ -336,23 +336,23 @@ def main():
     for i, one_path in enumerate(scenarios, start=1):
         result[f"scenario_{i:02d}"] = one_path
 
-    # فایل خروجی شامل ۵۰ ستون سناریو و سه ستون چندکی است.
+    # Output contains 50 scenario columns and three quantile columns.
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     result.to_csv(args.output, index=False)
-    print(f"روز آزمون: {target}، تعداد بازه‌ها: {len(test)}")
-    print(f"روزهای باقیماندهٔ خارج از نمونه: {len(residuals)}")
-    print(f"حاشیهٔ کالیبراسیون از فوریه تا اوت: {gap:.2f} یورو/MWh")
-    print(f"پوشش همان دوره قبل/بعد از اصلاح: {raw_calib:.3f} / {fixed_calib:.3f}")
-    print(f"سپتامبر ({sep_days} روز)، پوشش خام/اصلاح ثابت/اصلاح غلتان: "
+    print(f"Evaluation day: {target}; intervals: {len(test)}")
+    print(f"Out-of-sample residual days: {len(residuals)}")
+    print(f"February-August calibration margin: {gap:.2f} EUR/MWh")
+    print(f"Calibration coverage before/after adjustment: {raw_calib:.3f} / {fixed_calib:.3f}")
+    print(f"September ({sep_days} days), raw/fixed/rolling coverage: "
           f"{raw_sep:.3f} / {fixed_sep:.3f} / {rolling_sep:.3f}")
-    print(f"پوشش صدک ۱۰–۹۰٪ سناریوهای غلتان سپتامبر: {scenario_sep:.3f}")
-    print(f"حاشیهٔ صرفاً گذشته برای شروع اکتبر: {october_gap:.2f} یورو/MWh")
-    print(f"ضریب پهنای مسیرها (تنظیم فقط روی سپتامبر): {factor:.3f}")
-    print(f"آزمون دست‌نخوردهٔ اکتبر ({october_days} روز عادی)، "
-          f"پوشش بازه/صدک سناریوها: {october_band:.3f} / {october_paths:.3f}")
-    print("هشدار: سپتامبر ماه توسعه است؛ ۲۵ اکتبر ۱۰۰بازه‌ای در آزمون سناریو حذف شده.")
-    print(f"۵۰ سناریو با وزن برابر ۱/۵۰ ساخته شد: {args.output}")
-    print("نکته: کالیبراسیون حاشیه‌ای تضمین CVaR یا اعتبار اقتصادی نمی‌دهد.")
+    print(f"September rolling scenario 10th-90th percentile coverage: {scenario_sep:.3f}")
+    print(f"Past-only margin for October start: {october_gap:.2f} EUR/MWh")
+    print(f"Scenario width factor (September only): {factor:.3f}")
+    print(f"October evaluation ({october_days} regular days), "
+          f"interval/scenario percentile coverage: {october_band:.3f} / {october_paths:.3f}")
+    print("Warning: September is a development month; October 25 DST day is excluded.")
+    print(f"Generated 50 equally weighted scenarios (1/50 each): {args.output}")
+    print("Note: marginal calibration does not validate CVaR or economic performance.")
 
 
 if __name__ == "__main__":

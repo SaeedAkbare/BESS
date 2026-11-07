@@ -1,7 +1,7 @@
-# اجرای کوچک برای آزمایش دریافت قیمت واقعی و تست‌های زمانی.
+# Small integration run for real price downloads and timestamp validation.
 name: Check DE-LU prices
 
-# با هر تغییر در فایل‌های مربوط یا به‌صورت دستی اجرا می‌شود.
+# Run manually or when related files change.
 on:
   workflow_dispatch:
   push:
@@ -11,7 +11,7 @@ on:
       - "test_data.py"
       - "requirements.txt"
 
-# فقط خواندن کد لازم است؛ هیچ داده‌ای خودکار روی main ذخیره نمی‌کنیم.
+# Read-only access; never commit downloaded data to main automatically.
 permissions:
   contents: read
 
@@ -19,29 +19,29 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      # سورس را دریافت می‌کند.
+      # Check out the source.
       - name: Checkout
         uses: actions/checkout@v4
 
-      # نسخهٔ ساده و ثابت پایتون.
+      # Use a pinned Python version.
       - name: Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # وابستگی‌های ضروری را نصب می‌کند.
+      # Install required dependencies.
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
 
-      # صحت زمان‌ها و داده‌های ناقص را بدون اینترنت تست می‌کند.
+      # Test timestamps and missing data without network access.
       - name: Run tests
         run: python -m unittest -v test_data
 
-      # یک روز واقعی، شامل تغییر ساعت پاییزی برلین، از API می‌گیرد.
+      # Fetch one real day including Berlin's autumn daylight-saving transition.
       - name: Fetch one real day
         run: python data.py --start 2026-10-25 --end 2026-10-25 --output output/DE-LU_2026-10-25.csv
 
-      # CSV فقط اگر تمام آزمون‌ها موفق بودند ذخیره می‌شود.
+      # Upload CSV only after validation succeeds.
       - name: Upload validated CSV
         uses: actions/upload-artifact@v4
         with:
