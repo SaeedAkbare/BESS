@@ -1,21 +1,21 @@
-"""آزمون‌های سادهٔ بررسی دم قیمت؛ اعداد این فایل کاملاً ساختگی و فقط برای تست‌اند."""
+"""Unit tests for price-tail diagnostics using synthetic fixtures only."""
 
 import unittest
 import numpy as np
 
-# تابع آماری را جدا از دریافت داده آزمایش می‌کنیم.
+# Test statistical functions without downloading data.
 from risk_audit import risk_metrics
 
 
 class PriceRiskAuditTests(unittest.TestCase):
-    """موارد خیلی منفی، پوشش بازه و سالم‌بودن شکل ورودی را بررسی می‌کند."""
+    """Check extreme negatives, interval coverage, and array shapes."""
 
     def test_exact_scenarios_cover_the_actual(self):
-        """اگر همهٔ سناریوها عین واقعیت باشند، هیچ خروجی از بازه نداریم."""
+        """Identical scenario paths must fully cover actual prices."""
 
-        # دو روز فرضی، هر روز سه بازهٔ متفاوت دارند.
+        # Two synthetic days with three intervals each.
         actual = np.array([[10., -5., 20.], [12., 15., -2.]])
-        # پنجاه کپی از همان روز را فقط برای کنترل محاسبات می‌سازیم.
+        # Repeat each actual path 50 times to verify calculations.
         paths = np.repeat(actual[:, None, :], repeats=50, axis=1)
         result = risk_metrics(actual, paths, -10., 25.)
 
@@ -28,9 +28,9 @@ class PriceRiskAuditTests(unittest.TestCase):
         self.assertFalse(result["risk_ready"])
 
     def test_extreme_negative_price_is_detected(self):
-        """قیمت واقعی بسیار منفی باید بیرون دم پایین سناریو ثبت شود."""
+        """An extreme negative price must fall below the scenario lower tail."""
 
-        # قیمت واقعی منفیِ شدید در بازهٔ سومِ روز دیده شده است.
+        # The third interval contains a synthetic extreme negative price.
         actual = np.array([[10., 10., -100.]])
         usual = np.array([9., 10., 11.])
         paths = np.repeat(usual[None, None, :], repeats=50, axis=1)
@@ -45,7 +45,7 @@ class PriceRiskAuditTests(unittest.TestCase):
         )
 
     def test_bad_shapes_are_rejected(self):
-        """اگر تعداد روزها یا بازه‌ها متفاوت باشد باید خطا بگیریم."""
+        """Reject mismatched day or interval dimensions."""
 
         actual = np.zeros((2, 3))
         paths = np.zeros((1, 50, 3))
@@ -53,7 +53,7 @@ class PriceRiskAuditTests(unittest.TestCase):
             risk_metrics(actual, paths, -1., 1.)
 
     def test_nonfinite_prices_are_rejected(self):
-        """قیمت خالی یا بی‌نهایت نباید وارد گزارش ریسک شود."""
+        """Reject missing or infinite price values."""
 
         actual = np.array([[1., float("nan"), 3.]])
         paths = np.ones((1, 50, 3))
