@@ -23,6 +23,26 @@ These metrics are pooled over eligible 15-minute intervals. They are
 descriptive diagnostics, not statistically independent observations.
 The October 25 daylight-saving day (100 intervals) is excluded.
 
+## Chronological deterioration within October
+
+Splitting the 30 eligible days into the first and last 15 days
+(October 25 is excluded) reveals a substantial temporal change:
+
+| Eligible-day segment | Above scenario 90th percentile | 10th–90th band coverage |
+| --- | ---: | ---: |
+| First 15 days | 23.06% | 73.54% |
+| Last 15 days | 42.71% | 50.07% |
+
+The most severe upper-tail misses are concentrated near month-end:
+October 28 (97.92% of intervals above the 90th percentile),
+October 29 (94.79%), October 30 (86.46%), and October 31 (100%).
+These figures come directly from the artifact's per-day diagnostic rows.
+
+This split was chosen *after inspecting October* and is exploratory.
+It is not a prospective change-point test, and the cause is unknown.
+It motivates checking temporal model drift, median forecast bias,
+and upper-tail residuals on earlier chronological validation periods.
+
 ## Interpretation
 
 The model's October scenario ensemble is **underdispersed and strongly
