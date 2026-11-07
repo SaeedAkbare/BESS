@@ -5,6 +5,7 @@ dates. The first evaluated month is calibration-only for risk-weight selection.
 """
 import argparse
 import json
+from datetime import date
 from pathlib import Path
 
 from battery_monthly_scenarios import month_bounds, run
@@ -24,6 +25,15 @@ def months_between(first, last):
     return months
 
 
+def validate_completed_months(first, last, *, today=None):
+    """Reject evaluations that include a not-yet-completed calendar month."""
+    months = months_between(first, last)
+    today = date.today() if today is None else today
+    if month_bounds(months[-1])[1] > today:
+        raise ValueError(f"Evaluation month {months[-1]} is not complete as of {today}")
+    return months
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--history", required=True)
@@ -33,7 +43,7 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--lookback-months", type=int)
     args = parser.parse_args()
-    months = months_between(args.first_month, args.last_month)
+    months = validate_completed_months(args.first_month, args.last_month)
     if len(months) < 2:
         raise ValueError("At least two completed months are needed for walk-forward selection")
     battery = Battery(capacity_mwh=2, power_mw=1, eta_charge=.95,
