@@ -50,6 +50,18 @@ class WalkForwardTests(unittest.TestCase):
             evaluate_months([report("2026-01"), report("2026-02") | {
                 "daily": [report("2026-03")["daily"][0]]}])
 
+    def test_rejects_nonfinite_profit(self):
+        for bad in (float("nan"), float("inf"), "100", True):
+            with self.subTest(bad=bad):
+                feb = report("2026-02")
+                feb["daily"][0]["1.0"] = bad
+                with self.assertRaises(ValueError):
+                    evaluate_months([report("2026-01"), feb])
+
+    def test_rejects_missing_calendar_month(self):
+        with self.assertRaisesRegex(ValueError, "consecutive"):
+            evaluate_months([report("2026-01"), report("2026-03")])
+
     def test_rejects_single_month(self):
         with self.assertRaises(ValueError):
             evaluate_months([report("2026-01")])
