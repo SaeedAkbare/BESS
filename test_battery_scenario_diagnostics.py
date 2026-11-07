@@ -13,12 +13,16 @@ class ScenarioDiagnosticTests(unittest.TestCase):
         self.assertEqual(result["observed_band_coverage"], 1.)
         self.assertEqual(result["above_90_fraction"], 0.)
         self.assertEqual(result["below_10_fraction"], 0.)
+        self.assertEqual(result["mean_signed_median_error_eur_mwh"], 0.)
+        self.assertEqual(result["mean_band_width_eur_mwh"], 8.)
 
     def test_all_prices_above_band(self):
         paths = np.vstack([np.zeros(96), np.ones(96)])
         result = scenario_diagnostics([("2026-10-01", paths, np.full(96, 20.))])
         self.assertEqual(result["observed_band_coverage"], 0.)
         self.assertEqual(result["above_90_fraction"], 1.)
+        self.assertEqual(result["mean_signed_median_error_eur_mwh"], 19.5)
+        self.assertEqual(result["mean_band_width_eur_mwh"], 0.8)
 
     def test_rejects_invalid_paths(self):
         with self.assertRaises(ValueError):
