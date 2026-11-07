@@ -51,6 +51,37 @@ class MonthlyScenarioTests(unittest.TestCase):
                             for days in seen_training))
         self.assertEqual(meta["model_training_before"], "2026-10-01")
 
+    def test_monthly_report_includes_daily_dispatch(self):
+        from battery_monthly_scenarios import run
+        from battery_optimization import Battery
+
+        scenarios = np.zeros((2, 96))
+        actual = np.zeros(96)
+        fake_schedule = {
+            "charge_mw": [0.0] * 96,
+            "discharge_mw": [0.0] * 96,
+            "energy_mwh": [1.0] * 97,
+        }
+        battery = Battery(2, 1, .95, .95, 1)
+        with patch("scenarios.prepare", return_value=pd.DataFrame()), \
+             patch("battery_monthly_scenarios.prepare", return_value=pd.DataFrame()), \
+             patch("battery_monthly_scenarios.build_month",
+                   return_value=([("2026-10-01", scenarios, actual)],
+                                 {"month": "2026-10", "skipped_days": []})), \
+             patch("battery_monthly_scenarios.scenario_diagnostics",
+                   return_value={}), \
+             patch("battery_optimization.stochastic",
+                   return_value=fake_schedule), \
+             patch("battery_optimization.perfect_foresight",
+                   return_value=fake_schedule):
+            report = run("unused.csv", "2026-10", battery)
+        row = report["daily"][0]
+        self.assertEqual(len(row["dispatch"]["1.0"]["charge_mw"]), 96)
+        self.assertEqual(len(row["dispatch"]["1.0"]["energy_mwh"]), 97)
+        self.assertEqual(row["dispatch"]["1.0"]["discharge_mw"], [0.0] * 96)
+        self.assertEqual(row["1.0"], 0.0)
+
+
 
 if __name__ == "__main__":
     unittest.main()
