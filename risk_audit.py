@@ -1,6 +1,6 @@
-"""بررسی ریسک ۵۰ سناریوی قیمت با دادهٔ واقعی اکتبر ۲۰۲۶.
+"""Audit 50 price scenarios against real October 2026 prices.
 
-این فایل فقط کیفیت سناریوهای قیمت را می‌سنجد؛ سود باتری یا CVaR آن را محاسبه نمی‌کند.
+This module assesses price scenarios, not battery profit or CVaR.
 """
 import json
 from datetime import date
@@ -9,44 +9,44 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-# توابع سناریوسازی قبلی را استفاده می‌کنیم تا روش آزمون دقیقاً همان روش پروژه باشد.
+# Reuse the project scenario generation functions for consistent evaluation.
 from scenarios import (prepare, fit_quantiles, predict, past_residual_days,
                        september_diagnostic, sample_scenarios)
 
 
 def serial_correlation(values):
-    """همبستگی قیمت دو بازهٔ ۱۵دقیقه‌ایِ متوالی در یک روز را برمی‌گرداند."""
+    """Return adjacent 15-minute price autocorrelation within a day."""
 
-    # برای روزهای با قیمت ثابت، همبستگی تعریف نشده است.
+    # Correlation is undefined for constant-price paths.
     if np.std(values[:-1]) == 0 or np.std(values[1:]) == 0:
         return float("nan")
     return float(np.corrcoef(values[:-1], values[1:])[0, 1])
 
 
 def risk_metrics(actual, paths, historical_low, historical_high):
-    """قیمت واقعی را با توزیع سناریوها و دم‌های بالایی/پایینی مقایسه می‌کند.
+    """Compare actual prices with scenario distributions and upper/lower tails.
 
-    actual: آرایهٔ (روز، ۹۶ بازه)؛ paths: آرایهٔ (روز، ۵۰ سناریو، ۹۶ بازه).
+    actual: (days, 96 intervals); paths: (days, 50 scenarios, 96 intervals).
     """
 
-    # ابتدا شکل ورودی را بررسی می‌کنیم؛ هیچ قیمتِ آزمایشی نباید گم شود.
+    # Validate array shapes without discarding evaluation prices.
     if actual.ndim != 2 or paths.ndim != 3:
-        raise ValueError("شکل آرایه‌های قیمت/سناریو درست نیست.")
+        raise ValueError("Invalid price/scenario array dimensions.")
     if actual.shape[0] != paths.shape[0] or actual.shape[1] != paths.shape[2]:
-        raise ValueError("تعداد روزها یا بازه‌ها بین قیمت و سناریو متفاوت است.")
+        raise ValueError("Realized and scenario arrays have mismatched days or intervals.")
     if not np.isfinite(actual).all() or not np.isfinite(paths).all():
-        raise ValueError("قیمت NaN یا نامتناهی وجود دارد.")
+        raise ValueError("Non-finite actual or scenario prices.")
 
-    # صدک ۱۰ و ۹۰ هر بازه از ۵۰ سناریو محاسبه می‌شود.
+    # Calculate 10th and 90th percentiles across the 50 scenarios.
     p10, p90 = np.quantile(paths, [0.1, 0.9], axis=1)
     below = float(np.mean(actual < p10))
     above = float(np.mean(actual > p90))
 
-    # آستانه‌های نادر در این اجرا فقط از دورهٔ آموزش (قبل از اکتبر) آمده‌اند.
-    # مقایسهٔ فراوانی قیمت منفی و قیمت‌های خارج از ۵/۹۵ تاریخی.
+    # Extreme thresholds are calculated from pre-October training data only.
+    # Compare negative prices and exceedances of training 5th/95th percentiles.
     extreme_rates = {
         "negative_actual": float(np.mean(actual < 0)),
-        # تعداد صریح را هم می‌نویسیم تا گردکردن صفرِ اشتباه نشان ندهد.
+        # Keep explicit counts to avoid rounding rare events to zero.
         "negative_actual_count": int(np.sum(actual < 0)),
         "negative_scenarios": float(np.mean(paths < 0)),
         "below_training_p05_actual": float(np.mean(actual < historical_low)),
@@ -55,32 +55,32 @@ def risk_metrics(actual, paths, historical_low, historical_high):
         "above_training_p95_scenarios": float(np.mean(paths > historical_high)),
     }
 
-    # اختلاف بیشترین و کمترین قیمت در کل یک روز را مقایسه می‌کنیم.
+    # Compare daily peak-to-trough price ranges.
     real_range = np.ptp(actual, axis=1)
     scenario_range = np.ptp(paths, axis=2)
     high_range = np.quantile(scenario_range, 0.9, axis=1)
 
-    # سنجش دمِ کمینه و بیشینهٔ یک روز، نه فقط تک‌بازه‌ها.
+    # Evaluate daily minima and maxima, not only individual intervals.
     real_min, real_max = actual.min(axis=1), actual.max(axis=1)
     predicted_min = paths.min(axis=2)
     predicted_max = paths.max(axis=2)
     low_min = np.quantile(predicted_min, 0.1, axis=1)
     high_max = np.quantile(predicted_max, 0.9, axis=1)
 
-    # همبستگی بازه‌های مجاور را هم مقایسه می‌کنیم.
+    # Compare adjacent-interval autocorrelation.
     real_corr = [serial_correlation(day) for day in actual]
     path_corr = [serial_correlation(path) for day in paths for path in day]
 
-    # عددهای گزارش فقط معیارهای تشخیصی‌اند، نه سود/زیان یک برنامهٔ باتری.
+    # These are price diagnostics, not battery schedule profit/loss metrics.
     return {
         "days_evaluated": int(len(actual)),
         "intervals_evaluated": int(actual.size),
         "scenarios_per_day": int(paths.shape[1]),
         "training_p05_eur_mwh": float(historical_low),
         "training_p95_eur_mwh": float(historical_high),
-        "below_scenario_p10_rate": below,     # هدف اسمی حدود ۱۰٪
-        "above_scenario_p90_rate": above,     # هدف اسمی حدود ۱۰٪
-        "scenario_p10_p90_coverage": 1.0 - below - above,  # هدف اسمی ۸۰٪
+        "below_scenario_p10_rate": below,     # Nominal target about 10%.
+        "above_scenario_p90_rate": above,     # Nominal target about 10%.
+        "scenario_p10_p90_coverage": 1.0 - below - above,  # Nominal target 80%.
         "extreme_interval_rates": extreme_rates,
         "mean_actual_daily_range_eur_mwh": float(real_range.mean()),
         "mean_scenario_daily_range_eur_mwh": float(scenario_range.mean()),
@@ -94,22 +94,22 @@ def risk_metrics(actual, paths, historical_low, historical_high):
             float(np.nanmean(real_corr)),
         "mean_scenario_adjacent_quarterhour_correlation":
             float(np.nanmean(path_corr)),
-        "risk_ready": False,  # این تست، دنبالهٔ سود و CVaR را تأیید نمی‌کند.
+        "risk_ready": False,  # Price diagnostics do not validate battery CVaR.
         "notes": [
-            "قیمت‌های اکتبر فقط بعد از تولید سناریوی هر روز برای ارزیابی خوانده شدند.",
-            "روز ۲۵ اکتبر با ۱۰۰ بازه هنوز پشتیبانی نمی‌شود و حذف شده است.",
-            "برای صدک ۹۵ زیان، فقط حدود ۲ تا ۳ سناریو از ۵۰ مسیر در دم قرار دارد.",
-            "تست قیمت به‌تنهایی صحت دم زیان یک باتری با برنامهٔ مشخص را ثابت نمی‌کند.",
+            "October actuals were read only after each day's scenarios were generated.",
+            "October 25 has 100 intervals and is excluded because it is unsupported.",
+            "Only about 2-3 of 50 paths fall in the 95% loss tail.",
+            "Price diagnostics alone cannot validate the loss tail of a battery schedule.",
         ],
     }
 
 
 def main():
-    """از تاریخچهٔ ذخیره‌شده، سناریوهای اکتبر را می‌سازد و گزارش ریسک می‌دهد."""
+    """Build October scenarios from saved history and write a risk report."""
 
     import argparse
-    parser = argparse.ArgumentParser(description="آزمون دم‌های قیمت و نوسان روزانه")
-    parser.add_argument("--input", required=True, help="فایل CSV تاریخچهٔ DE-LU")
+    parser = argparse.ArgumentParser(description="Evaluate price tails and daily volatility")
+    parser.add_argument("--input", required=True, help="DE-LU historical CSV file")
     parser.add_argument("--output", default="output/risk_report.json")
     args = parser.parse_args()
 
@@ -118,24 +118,24 @@ def main():
     october = table[(table["day"] >= date(2026, 10, 1)) &
                     (table["day"] <= date(2026, 10, 31))]
 
-    # تمام پارامترها از داده‌های قبل از آزمون اکتبر تعیین می‌شوند.
+    # Determine all parameters using pre-October training data.
     residuals, gap, _, _, past_scores = past_residual_days(train)
     _, _, _, _, _, final_gap, factor = september_diagnostic(
         train, residuals, gap, past_scores)
     models = fit_quantiles(train)
 
-    # آستانهٔ افراطی ۵ و ۹۵ درصد را فقط از قیمت‌های پیش از اکتبر می‌گیریم.
+    # Calculate extreme thresholds from pre-October prices only.
     prices_before_october = train["price_eur_mwh"].to_numpy()
     p05, p95 = np.quantile(prices_before_october, [0.05, 0.95])
 
     actual_days, scenario_days = [], []
     for day, rows in october.groupby("day", sort=True):
-        # روز تغییر ساعت پاییزی ۱۰۰ بازه دارد؛ فعلاً بی‌صدا جایگزین نمی‌کنیم.
+        # Skip the unsupported 100-interval autumn DST day.
         if len(rows) != 96:
-            print(f"روز {day} با {len(rows)} بازه در آزمون سناریو لحاظ نشد.")
+            print(f"Skipped {day} ({len(rows)} intervals) in scenario evaluation.")
             continue
 
-        # پیش‌بینی و نمونه‌گیری بدون استفاده از قیمت واقعی همین روز.
+        # Predict and sample without using target-day realized prices.
         low, middle, high = predict(models, rows)
         paths = sample_scenarios(
             middle, low - final_gap, high + final_gap,
@@ -143,33 +143,33 @@ def main():
         paths = middle + factor * (paths - middle)
         scenario_days.append(paths)
 
-        # این خط فقط در پایان پیش‌بینی، قیمت واقعی را برای ارزیابی می‌خواند.
+        # Read actual prices only after generating scenarios for evaluation.
         actual_days.append(rows["price_eur_mwh"].to_numpy())
 
     report = risk_metrics(np.array(actual_days), np.array(scenario_days), p05, p95)
     report["training_last_day"] = "2026-09-30"
     report["evaluation_month"] = "2026-10"
 
-    # گزارش قابل بازتولید برای پژوهش ذخیره می‌شود.
+    # Write a reproducible research report.
     filename = Path(args.output)
     filename.parent.mkdir(parents=True, exist_ok=True)
     filename.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    print(f"روزها/بازه‌ها: {report['days_evaluated']} / {report['intervals_evaluated']}")
-    print(f"پوشش سناریوهای ۱۰–۹۰٪: {report['scenario_p10_p90_coverage']:.3f}")
-    print(f"خروج از پایین/بالای بازه: {report['below_scenario_p10_rate']:.3f} / "
+    print(f"Days/intervals: {report['days_evaluated']} / {report['intervals_evaluated']}")
+    print(f"Scenario 10th-90th percentile coverage: {report['scenario_p10_p90_coverage']:.3f}")
+    print(f"Below/above scenario bounds: {report['below_scenario_p10_rate']:.3f} / "
           f"{report['above_scenario_p90_rate']:.3f}")
-    print(f"دامنهٔ روزانه واقعی/سناریویی (میانگین EUR/MWh): "
+    print(f"Mean actual/scenario daily range (EUR/MWh): "
           f"{report['mean_actual_daily_range_eur_mwh']:.1f} / "
           f"{report['mean_scenario_daily_range_eur_mwh']:.1f}")
-    print("قیمت‌های منفی واقعی: "
-          f"{report['extreme_interval_rates']['negative_actual_count']} بازه از "
-          f"{report['intervals_evaluated']} بازه")
-    print("سهم قیمت منفی واقعی/سناریویی: "
+    print("Actual negative prices: "
+          f"{report['extreme_interval_rates']['negative_actual_count']} intervals out of "
+          f"{report['intervals_evaluated']} intervals")
+    print("Actual/scenario negative-price rate: "
           f"{100*report['extreme_interval_rates']['negative_actual']:.3f}% / "
           f"{100*report['extreme_interval_rates']['negative_scenarios']:.2f}%")
-    print(f"گزارش ذخیره شد: {filename}")
-    print("هشدار: این بررسی قیمت است؛ کالیبراسیون سودِ منفی یا CVaR باتری نیست.")
+    print(f"Saved report: {filename}")
+    print("Warning: price diagnostics do not validate battery profit/loss or CVaR.")
 
 
 if __name__ == "__main__":
