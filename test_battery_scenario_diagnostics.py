@@ -22,7 +22,7 @@ class ScenarioDiagnosticTests(unittest.TestCase):
         self.assertEqual(result["observed_band_coverage"], 0.)
         self.assertEqual(result["above_90_fraction"], 1.)
         self.assertEqual(result["mean_signed_median_error_eur_mwh"], 19.5)
-        self.assertEqual(result["mean_band_width_eur_mwh"], 0.8)
+        self.assertAlmostEqual(result["mean_band_width_eur_mwh"], 0.8)
 
     def test_rejects_invalid_paths(self):
         with self.assertRaises(ValueError):
