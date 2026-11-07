@@ -58,12 +58,18 @@ def evaluate_months(reports, *, lookback_months=None):
         training = [row for m in history for row in by_month[m]["daily"]]
         totals = {w: sum(row[w] for row in training) for w in WEIGHTS}
         chosen = max(WEIGHTS, key=lambda w: (totals[w], -float(w)))
+        selection_cutoff = date.fromisoformat(month + "-01")
+        if any(date.fromisoformat(row["day"]) >= selection_cutoff for row in training):
+            raise ValueError("Risk-weight selection contains evaluation-month or future prices")
         evaluation = by_month[month]["daily"]
         selected = summarize([row[chosen] for row in evaluation], alpha)
         baseline = summarize([row["0.0"] for row in evaluation], alpha)
         outcomes.append({
             "evaluation_month": month,
             "selection_months": history,
+            "selection_cutoff_exclusive": selection_cutoff.isoformat(),
+            "selection_observation_count": len(training),
+            "selection_rule": "maximum total realized profit in prior months; ties choose lower lambda",
             "selected_lambda": float(chosen),
             "selection_profit_eur": totals,
             "days": len(evaluation),
