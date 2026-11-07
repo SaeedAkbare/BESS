@@ -28,9 +28,19 @@ def extend_history(existing_csv, last_month, *, today=None, fetcher=fetch_prices
     if base["timestamp_utc"].isna().any() or base["timestamp_utc"].duplicated().any():
         raise ValueError("Invalid or duplicate historical timestamps")
     base = base.sort_values("timestamp_utc").reset_index(drop=True)
+    if base["price_eur_mwh"].isna().any():
+        raise ValueError("Missing historical prices")
+    if not base["timestamp_utc"].diff().dropna().eq(pd.Timedelta(minutes=15)).all():
+        raise ValueError("Existing historical prices have missing intervals")
     if base.empty:
         raise ValueError("Historical CSV is empty")
     local_last = base["timestamp_utc"].iloc[-1].tz_convert("Europe/Berlin").date()
+    local_first = base["timestamp_utc"].iloc[0].tz_convert("Europe/Berlin")
+    if local_first.hour != 0 or local_first.minute != 0 or local_first.day != 1:
+        raise ValueError("Historical CSV must begin at the start of a local month")
+    local_last_time = base["timestamp_utc"].iloc[-1].tz_convert("Europe/Berlin")
+    if local_last_time.hour != 23 or local_last_time.minute != 45:
+        raise ValueError("Historical CSV must end at the end of a local day")
     next_day = local_last + timedelta(days=1)
     if next_day.day != 1:
         raise ValueError("Historical CSV does not end on a full local calendar month")
