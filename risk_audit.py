@@ -120,7 +120,7 @@ def main():
 
     # تمام پارامترها از داده‌های قبل از آزمون اکتبر تعیین می‌شوند.
     residuals, gap, _, _, past_scores = past_residual_days(train)
-    _, _, _, _, _, final_gap, factor = september_diagnostic(
+    _, _, _, _, _, final_gap, positive_factor, negative_factor = september_diagnostic(
         train, residuals, gap, past_scores)
     models = fit_quantiles(train)
 
@@ -140,7 +140,7 @@ def main():
         paths = sample_scenarios(
             middle, low - final_gap, high + final_gap,
             residuals, seed=42 + len(actual_days))
-        paths = middle + factor * (paths - middle)
+        paths = middle + np.where(paths >= middle, positive_factor, negative_factor) * (paths - middle)
         scenario_days.append(paths)
 
         # این خط فقط در پایان پیش‌بینی، قیمت واقعی را برای ارزیابی می‌خواند.
