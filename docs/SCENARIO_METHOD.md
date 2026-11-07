@@ -24,7 +24,7 @@ Real-world auction bids may be price-contingent and have more complex acceptance
 
 - GitHub Actions run **completed successfully**: https://github.com/SaeedAkbare/BESS/actions/runs/42304420229
 - [Validated one-day CSV artifact](https://github.com/SaeedAkbare/BESS/actions/runs/42304420229/artifacts/13546180518) (stored as an Actions artifact, **not committed to the repository**).
-- Code: [`data.py`](data.py) (small downloader with Persian line/function comments), [`test_data.py`](test_data.py) (six unit tests), and [`check_prices.yml`](.github/workflows/check_prices.yml) (CI workflow).
+- Code: [`data.py`](../data.py) (small downloader with Persian line/function comments), [`test_data.py`](../test_data.py) (six unit tests), and [`check_prices.yml`](../.github/workflows/check_prices.yml) (CI workflow).
 - The run printed: **`100` valid intervals saved** for 2026-10-25 (Berlin fall-DST day); all six tests passed.
 - Initial test failures were useful and **fixed**: compare DST timestamps in UTC and accept the actual API unit spelling `EUR / MWh` in addition to `EUR/MWh`.
 - **Caution:** this success establishes access and schema/completeness for *one delivery day only*. It is not evidence that the entire proposed training/test period is available, complete, or free of revisions. Retrieve a longer history and test day-by-day before claiming a full backtest dataset.
@@ -43,7 +43,7 @@ Real-world auction bids may be price-contingent and have more complex acceptance
 
 - **Successful GitHub Actions run:** https://github.com/SaeedAkbare/BESS/actions/runs/42306547577
 - **50-path quarter-hour CSV (2026-10-15):** https://github.com/SaeedAkbare/BESS/actions/runs/42306547577/artifacts/13546357238
-- **Simple code with Persian comments:** [`scenarios.py`](scenarios.py), [`test_scenarios.py`](test_scenarios.py), [`test_scenarios.yml`](.github/workflows/test_scenarios.yml).
+- **Simple code with Persian comments:** [`scenarios.py`](../scenarios.py), [`test_scenarios.py`](../test_scenarios.py), [`test_scenarios.yml`](../.github/workflows/test_scenarios.yml).
 - **Method:** sklearn quantile HGB regressors (q10/q50/q90), calendar + previously published prior-day DA price summaries as pre-auction features, four expanding temporal validation folds (Feb–Sep 2026), whole-day normalized out-of-sample error vectors resampled with seed 42. **241** usable ordinary-day residual trajectories were logged, with **50** equally weighted Monte Carlo draws for the held-out ordinary day 2026-10-15 (**96** intervals).
 - **Critical empirical limitation:** q10–q90 validation coverage **0.502**, well below the **0.80 nominal** target. This shows **underestimated uncertainty/miscalibration**. The fact that CSV files were generated does **not** imply good probabilistic scenarios, accurate trading signals, or economically reliable stochastic optimization. Improve/validate calibration out of sample **before** making any performance/risk claims, especially tail CVaR; consider longer calibration windows, stronger ex-ante features, and/or calibrated residual scaling.
 - **DST scope:** current scenario prototype intentionally rejects delivery days with 92 or 100 intervals; they are present in the raw dataset but not yet valid scenario targets. Do not silently force 96 intervals on DST days.
@@ -54,7 +54,7 @@ Real-world auction bids may be price-contingent and have more complex acceptance
 
 - **Verified successful run:** https://github.com/SaeedAkbare/BESS/actions/runs/42307562026
 - **Downloadable new October 15 scenario CSV:** https://github.com/SaeedAkbare/BESS/actions/runs/42307562026/artifacts/13546363503
-- **Code:** [`scenarios.py`](scenarios.py), with Persian comments; ten tests in [`test_scenarios.py`](test_scenarios.py) and [`test_data.py`](test_data.py) passed in CI.
+- **Code:** [`scenarios.py`](../scenarios.py), with Persian comments; ten tests in [`test_scenarios.py`](../test_scenarios.py) and [`test_data.py`](../test_data.py) passed in CI.
 - **Before correction**, an earlier model's q10–q90 coverage was 50.2% on February–September expanding folds. In a revised February–August out-of-sample calibration set, raw coverage was **51.8%**, with an *in-calibration* conformal margin of **26.85 EUR/MWh** yielding **80.0%** on that **same** calibration set. *That 80% is not independent validation.*
 - **September 2026 model-development diagnostic (30 normal days):** raw q10–q90 coverage **33.4%**; historical static margin **59.5%**; time-ordered, **past-30-day-only** conformal margin **74.8%**. The 50-scenario empirical p10–p90 band covered **66.0%** before separate scenario spread calibration. September was examined to revise the method, so it is **not an untouched test set**.
 - **After September ended**, the method fixed (a) a **46.91 EUR/MWh** conservative interval margin calculated from September out-of-sample errors and (b) a **1.377** scenario spread multiplier calculated **only with September**. Both were fixed before October performance evaluation; no October actual prices went into the model fit or these factors.
@@ -64,7 +64,7 @@ Real-world auction bids may be price-contingent and have more complex acceptance
 
 ## October scenario price-tail audit — completed 2026-11-06, risk quality gate FAILED
 
-- **Executed GitHub Actions audit:** https://github.com/SaeedAkbare/BESS/actions/runs/42308469125 (14 tests passed, real CSV input, JSON artifact). **Report artifact:** https://github.com/SaeedAkbare/BESS/actions/runs/42308469125/artifacts/13546534465. Implementation: [`risk_audit.py`](risk_audit.py), [`test_risk_audit.py`](test_risk_audit.py) and [`audit_risk.yml`](.github/workflows/audit_risk.yml).
+- **Executed GitHub Actions audit:** https://github.com/SaeedAkbare/BESS/actions/runs/42308469125 (14 tests passed, real CSV input, JSON artifact). **Report artifact:** https://github.com/SaeedAkbare/BESS/actions/runs/42308469125/artifacts/13546534465. Implementation: [`risk_audit.py`](../risk_audit.py), [`test_risk_audit.py`](../test_risk_audit.py) and [`audit_risk.yml`](../.github/workflows/audit_risk.yml).
 - **Held-out period:** 30 ordinary October 2026 Berlin delivery days, **2,880 actual quarter-hour prices**, compared against **50 price-scenario trajectories per day**, with September-only calibration. 2026-10-25 (100 periods due to DST) excluded; no price from the October target date was used in generation before evaluation.
 - **Interval scenario band:** empirical p10–p90 coverage **74.375%**; **4.271%** of realized prices fell below p10 and **21.354%** exceeded p90 (ideal tail split ~10% below, ~10% above). These are distinctly imbalanced, **not** merely a symmetric spread issue.
 - **Negative prices:** **1 of 2,880 observed intervals** (0.0347%) was negative, while **13.619%** of generated scenario prices were negative. Beware log rounding to 0.000 in earlier version; count has been checked from the JSON and print precision corrected in subsequent source update.
