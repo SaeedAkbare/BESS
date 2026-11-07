@@ -48,3 +48,54 @@ def paired_profit_bootstrap(daily, *, n_boot=5000, seed=42, confidence=.95):
             "Small numbers of evaluation months cannot establish generalization",
         ],
     }
+
+
+def month_block_profit_bootstrap(daily, *, n_boot=5000, seed=42,
+                                 confidence=.95, min_months=3):
+    """Resample complete evaluation months to retain within-month dependence.
+
+    Returns an explicitly unavailable interval when too few months exist.
+    This is descriptive inference, not proof of future generalization.
+    """
+    from collections import defaultdict
+    from datetime import date
+
+    if not 0 < confidence < 1:
+        raise ValueError("confidence must be strictly between 0 and 1")
+    if n_boot < 1 or min_months < 2:
+        raise ValueError("n_boot must be positive and min_months >= 2")
+    groups = defaultdict(list)
+    for row in daily:
+        day = date.fromisoformat(row["day"])
+        difference = float(row["selected"]) - float(row["risk_neutral"])
+        if not np.isfinite(difference):
+            raise ValueError("Daily profit differences must be finite")
+        groups[day.strftime("%Y-%m")].append(difference)
+    if len(groups) < min_months:
+        return {
+            "method": "paired_month_block_bootstrap",
+            "status": "insufficient_months",
+            "observed_months": len(groups),
+            "required_months": min_months,
+            "mean_daily_difference_ci_eur": None,
+            "limitations": ["Month-block inference withheld until enough evaluation months exist"],
+        }
+    blocks = [np.asarray(values) for _, values in sorted(groups.items())]
+    rng = np.random.default_rng(seed)
+    means = np.empty(n_boot)
+    for i in range(n_boot):
+        indices = rng.integers(0, len(blocks), size=len(blocks))
+        selected = [blocks[j] for j in indices]
+        means[i] = sum(block.sum() for block in selected) / sum(len(block) for block in selected)
+    lower, upper = np.quantile(means, [(1 - confidence) / 2, (1 + confidence) / 2])
+    return {
+        "method": "paired_month_block_bootstrap",
+        "status": "available",
+        "observed_months": len(blocks),
+        "required_months": min_months,
+        "confidence": confidence,
+        "bootstrap_samples": n_boot,
+        "seed": seed,
+        "mean_daily_difference_ci_eur": [float(lower), float(upper)],
+        "limitations": ["Few monthly blocks can yield unstable confidence intervals"],
+    }
