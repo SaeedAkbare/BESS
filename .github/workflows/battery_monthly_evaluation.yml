@@ -50,6 +50,30 @@ jobs:
             --history input/prices_DE-LU_2025-10_to_2026-10.csv \
             --month "$MONTH" \
             --output "output/monthly_${MONTH}.json"
+      - name: Validate monthly dispatch output
+        env:
+          MONTH: ${{ inputs.month || '2026-10' }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          month = os.environ["MONTH"]
+          report = json.loads(Path(f"output/monthly_{month}.json").read_text())
+          assert report["month"] == month
+          assert report["daily"], "No evaluated days"
+          assert report["summary"], "No profit summary"
+          for row in report["daily"]:
+              assert "oracle" in row
+              for weight in ("0.0", "0.25", "0.5", "1.0", "2.0"):
+                  schedule = row["dispatch"][weight]
+                  assert len(schedule["charge_mw"]) == 96
+                  assert len(schedule["discharge_mw"]) == 96
+                  assert len(schedule["energy_mwh"]) == 97
+                  assert isinstance(row[weight], (int, float))
+          print(f"Validated {len(report['daily'])} daily dispatch schedules")
+          PY
       - name: Upload monthly evaluation
         uses: actions/upload-artifact@v4
         with:
