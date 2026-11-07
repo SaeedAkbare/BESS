@@ -111,11 +111,16 @@ def run(history_csv, month, battery, *, alpha=.95, seed=42):
     diagnostics = scenario_diagnostics(daily_inputs)
     daily = []
     for day, paths, actual in daily_inputs:
-        row = {"day": day}
+        row = {"day": day, "dispatch": {}}
         for weight in WEIGHTS:
             dispatch = stochastic(paths, battery, risk_weight=weight, alpha=alpha)
             row[str(weight)] = realized_profit(
                 dispatch, actual, variable_cost=battery.variable_cost_eur_mwh)
+            row["dispatch"][str(weight)] = {
+                "charge_mw": dispatch["charge_mw"],
+                "discharge_mw": dispatch["discharge_mw"],
+                "energy_mwh": dispatch["energy_mwh"],
+            }
         oracle = perfect_foresight(actual, battery)
         row["oracle"] = realized_profit(
             oracle, actual, variable_cost=battery.variable_cost_eur_mwh)
