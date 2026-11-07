@@ -18,6 +18,8 @@ from pathlib import Path
 
 import numpy as np
 
+from battery_scenario_diagnostics import scenario_diagnostics
+
 from scenarios import (
     prepare, past_residual_days, fit_quantiles, predict,
     sample_scenarios, calibration_gap,
@@ -106,6 +108,7 @@ def run(history_csv, month, battery, *, alpha=.95, seed=42):
     from battery_october_benchmark import summarize
 
     daily_inputs, metadata = build_month(prepare(history_csv), month, seed=seed)
+    diagnostics = scenario_diagnostics(daily_inputs)
     daily = []
     for day, paths, actual in daily_inputs:
         row = {"day": day}
@@ -119,6 +122,7 @@ def run(history_csv, month, battery, *, alpha=.95, seed=42):
         daily.append(row)
     return {
         **metadata, "alpha": alpha, "battery": vars(battery),
+        "scenario_diagnostics": diagnostics,
         "battery_verified": False, "daily_cyclic_soc": True,
         "summary": {str(w): summarize([r[str(w)] for r in daily], alpha)
                     for w in WEIGHTS},
