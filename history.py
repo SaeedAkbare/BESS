@@ -1,79 +1,79 @@
-"""دانلود تاریخچهٔ واقعی قیمت‌های ۱۵دقیقه‌ای؛ هر ماه جداگانه کنترل می‌شود."""
+"""Download and validate real 15-minute historical prices month by month."""
 
-# pandas برای ساخت ماه‌ها و ترکیب جدول‌هاست.
+# Use pandas for monthly dates and table concatenation.
 import pandas as pd
-# برای توقف کوتاه بین درخواست‌ها به API.
+# Pause between API requests.
 import time
-# برای کنترل محدودیت تعداد درخواست‌های API.
+# Handle API rate limits.
 import requests
-# برای ساخت پوشهٔ خروجی.
+# Create output directories.
 from pathlib import Path
 
-# همان تابع سادهٔ دانلود و بررسیِ data.py را دوباره استفاده می‌کنیم.
+# Reuse the validated downloader from data.py.
 from data import fetch_prices
 
 
 def main():
-    """ماه‌های آموزش و آزمون را می‌گیرد، کامل‌بودن را می‌سنجد و یک CSV می‌سازد."""
+    """Download training and evaluation months and combine validated CSVs."""
 
-    # فقط قیمت‌های بعد از آغاز بازار ۱۵دقیقه‌ای را انتخاب می‌کنیم.
+    # Use prices from after the 15-minute market launch.
     months = pd.date_range("2025-10-01", "2026-10-01", freq="MS")
 
-    # جدول هر ماه فقط پس از اعتبارسنجی به این فهرست اضافه می‌شود.
+    # Append each month only after validation.
     monthly_tables = []
 
-    # فایل هر ماه را همان لحظه ذخیره می‌کنیم تا در خطا از دست نرود.
+    # Persist each month immediately to preserve progress.
     output_dir = Path("output/history")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # هر درخواست یک ماه است تا خطا و ماه ناقص راحت شناسایی شوند.
+    # Request one month at a time to detect incomplete periods.
     for month in months:
-        # اولین روز و آخرین روز تقویمی همان ماه.
+        # Compute the first and last day of the month.
         start = month.strftime("%Y-%m-%d")
         end = (month + pd.offsets.MonthEnd(0)).strftime("%Y-%m-%d")
 
-        # اگر API خطای 429 بدهد، به‌جای درخواست‌های پشت‌سرهم صبر می‌کنیم.
+        # Retry after HTTP 429 rate limits.
         for attempt in range(3):
             try:
-                # این تابع تمام روزها، قیمت‌ها و تغییر ساعت را بررسی می‌کند.
+                # Validate every interval and DST transition.
                 df = fetch_prices(start, end)
                 break
             except requests.HTTPError as error:
-                # بقیهٔ خطاهای سرور را پنهان نمی‌کنیم.
+                # Propagate other server errors.
                 if error.response is None or error.response.status_code != 429 or attempt == 2:
                     raise
-                # پس از محدودیت API به‌ترتیب ۶۰ و ۱۲۰ ثانیه مکث می‌کنیم.
+                # Wait 60 and 120 seconds after rate limiting.
                 wait = 60 * (attempt + 1)
-                print(f"محدودیت API (429)، تلاش دوباره پس از {wait} ثانیه...", flush=True)
+                print(f"API rate limit (429); retrying after {wait} seconds...", flush=True)
                 time.sleep(wait)
 
-        # هر ماه یک فایلِ واقعی و بررسی‌شده خواهد داشت.
+        # Persist each validated month separately.
         table = df[["timestamp_utc", "timestamp_berlin", "price_eur_mwh"]]
         table.to_csv(output_dir / f"DE-LU_{month.strftime('%Y-%m')}.csv", index=False)
         monthly_tables.append(table)
-        print(f"ماه {month.strftime('%Y-%m')}: {len(df)} بازهٔ معتبر", flush=True)
+        print(f"Month {month.strftime('%Y-%m')}: {len(df)} validated intervals", flush=True)
 
-        # ۱۵ ثانیه فاصله می‌گذاریم تا API را با درخواست سریع تحت فشار نگذاریم.
+        # Wait 15 seconds between requests.
         time.sleep(15)
 
-    # تمام ماه‌ها را پشت سر هم قرار می‌دهیم.
+    # Concatenate all monthly tables.
     result = pd.concat(monthly_tables, ignore_index=True)
 
-    # حتی بین دو ماه نیز نباید یک زمان دوبار دیده شود.
+    # Reject duplicate timestamps across months.
     if result["timestamp_utc"].duplicated().any():
-        raise ValueError("زمان تکراری بین فایل‌های ماهانه پیدا شد.")
+        raise ValueError("Duplicate timestamps across monthly files.")
 
-    # زمان‌ها را مرتب می‌کنیم تا فایل برای آموزش آماده باشد.
+    # Sort timestamps for model training.
     result = result.sort_values("timestamp_utc").reset_index(drop=True)
 
-    # تنها پس از صحت‌سنجی کامل فایل ترکیبی خروجی تولید می‌شود.
+    # Write combined CSV only after validation.
     filename = "output/prices_DE-LU_2025-10_to_2026-10.csv"
     result.to_csv(filename, index=False)
-    print(f"تعداد کل بازه‌های معتبر: {len(result)}")
-    print(f"فایل نهایی: {filename}")
-    print("منبع: Energy-Charts.info")
+    print(f"Total validated intervals: {len(result)}")
+    print(f"Combined file: {filename}")
+    print("Source: Energy-Charts.info")
 
 
-# اجرای مستقیم این فایل، کار را آغاز می‌کند.
+# Run only when invoked directly.
 if __name__ == "__main__":
     main()
