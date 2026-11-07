@@ -1,129 +1,129 @@
-"""دریافت قیمت واقعی Day-Ahead منطقه DE-LU از Energy-Charts."""
+"""Fetch real DE-LU day-ahead electricity prices from Energy-Charts."""
 
-# کتابخانهٔ ورودی‌های خط فرمان را وارد می‌کنیم.
+# Import CLI argument parsing.
 import argparse
-# برای محاسبهٔ روز بعد از آن استفاده می‌کنیم.
+# Calculate the following calendar day.
 from datetime import timedelta
-# پوشهٔ خروجی CSV را در صورت نیاز می‌سازیم.
+# Create the output directory if necessary.
 from pathlib import Path
 
-# pandas برای جدول داده و تاریخ‌های دارای منطقهٔ زمانی است.
+# Use pandas for tabular and timezone-aware data.
 import pandas as pd
-# requests درخواست اینترنتی به API را ارسال می‌کند.
+# Use requests for API calls.
 import requests
 
 
-# آدرس رسمی API و منطقهٔ بازار مورد مطالعه.
+# Official API endpoint and bidding zone.
 API_URL = "https://api.energy-charts.info/price"
 ZONE = "DE-LU"
 TIMEZONE = "Europe/Berlin"
 
 
 def validate_prices(df, start, end):
-    """بررسی می‌کند که قیمت تمام بازه‌های ۱۵دقیقه‌ای، حتی روز تغییر ساعت، موجود باشد."""
+    """Validate complete 15-minute price intervals, including DST transition days."""
 
-    # داده را بر اساس زمان جهانی مرتب می‌کنیم.
+    # Sort records by UTC timestamp.
     df = df.sort_values("timestamp_utc").reset_index(drop=True)
 
-    # زمان یا قیمت خالی و قیمت غیرعددی نباید وارد مدل شوند.
+    # Reject missing timestamps or invalid prices.
     if df[["timestamp_utc", "price_eur_mwh"]].isna().any().any():
-        raise ValueError("قیمت یا زمان نامعتبر/خالی در پاسخ API وجود دارد.")
+        raise ValueError("API response contains an invalid or missing price or timestamp.")
 
-    # timestampهای تکراری نشانهٔ مشکل هستند.
+    # Reject duplicate timestamps.
     if df["timestamp_utc"].duplicated().any():
-        raise ValueError("در داده‌ها زمان تکراری وجود دارد.")
+        raise ValueError("Duplicate timestamps in price data.")
 
-    # برای هر روز تقویمیِ برلین، همهٔ بازه‌های لازم را بررسی می‌کنیم.
+    # Validate each Berlin calendar day.
     for day in pd.date_range(start, end, freq="D"):
-        # ابتدای روز محلی؛ منطقهٔ زمانی به تغییر ساعت آگاه است.
+        # Local midnight accounts for DST transitions.
         first = pd.Timestamp(day.date(), tz=TIMEZONE)
-        # ابتدای روز بعد؛ نباید به سادگی ۲۴ ساعت اضافه کنیم.
+        # Use the next local midnight, not a fixed 24-hour offset.
         following = pd.Timestamp(day.date() + timedelta(days=1), tz=TIMEZONE)
 
-        # فهرست کامل زمان‌های ۱۵دقیقه‌ای روز را می‌سازیم (۹۲، ۹۶ یا ۱۰۰ مورد).
+        # Generate 92, 96 or 100 expected quarter-hour timestamps.
         expected = pd.date_range(first, following, freq="15min", inclusive="left")
-        # فقط زمان‌های همین روز را از داده انتخاب می‌کنیم.
+        # Select records for the current day.
         observed = df.loc[
             (df["timestamp_utc"] >= first.tz_convert("UTC"))
             & (df["timestamp_utc"] < following.tz_convert("UTC")),
             "timestamp_utc",
         ]
-        # اگر حتی یک ردیف کم یا اضافه باشد، فایل ناقص را قبول نمی‌کنیم.
-        # ساعت تکراری پاییز را برای مقایسه به UTC می‌بریم تا خطای fold پیش نیاید.
+        # Reject missing or extra intervals.
+        # Compare timestamps in UTC to distinguish repeated autumn hours.
         expected_utc = expected.tz_convert("UTC")
         if len(observed) != len(expected_utc) or set(observed) != set(expected_utc):
             raise ValueError(
-                f"روز {day.date()} ناقص است: {len(observed)} "
-                f"بازه به جای {len(expected)} بازهٔ ۱۵دقیقه‌ای."
+                f"Day {day.date()} is incomplete: {len(observed)} "
+                f"intervals instead of {len(expected)} expected 15-minute intervals."
             )
 
-    # دادهٔ بررسی‌شده را برمی‌گردانیم.
+    # Return validated data.
     return df
 
 
 def fetch_prices(start, end):
-    """قیمت‌های واقعی را از API می‌گیرد و آن‌ها را اعتبارسنجی می‌کند."""
+    """Fetch actual API prices and validate them."""
 
-    # ابتدا مطمئن می‌شویم تاریخ‌های ورودی درست و مرتب هستند.
+    # Require ordered start and end dates.
     if pd.Timestamp(start) > pd.Timestamp(end):
-        raise ValueError("تاریخ شروع نمی‌تواند بعد از پایان باشد.")
+        raise ValueError("Start date must not be later than end date.")
 
-    # هر دو تاریخ در API شامل روز کامل هستند.
+    # Both dates are inclusive in the API.
     parameters = {"bzn": ZONE, "start": start, "end": end}
-    # درخواست با حداکثر ۶۰ ثانیه مهلت ارسال می‌شود.
+    # Send a request with a 60-second timeout.
     response = requests.get(API_URL, params=parameters, timeout=60)
-    # خطاهای شبکه/سرور، مثلاً ۴۲۹، را پنهان نمی‌کنیم.
+    # Propagate server errors including HTTP 429.
     response.raise_for_status()
-    # متن JSON دریافتی را به دیکشنری پایتون تبدیل می‌کنیم.
+    # Parse the JSON response.
     raw = response.json()
 
-    # API ممکن است بین EUR و / و MWh فاصله بگذارد؛ فاصله را حذف می‌کنیم.
+    # Normalize whitespace in the EUR/MWh unit.
     if str(raw.get("unit", "")).replace(" ", "") != "EUR/MWh":
-        raise ValueError(f"واحد قیمت غیرمنتظره: {raw.get('unit')}")
+        raise ValueError(f"Unexpected price unit: {raw.get('unit')}")
 
-    # دو آرایهٔ زمان و قیمت باید موجود و هم‌طول باشند.
+    # Require matching timestamp and price arrays.
     times, prices = raw.get("unix_seconds"), raw.get("price")
     if not isinstance(times, list) or not isinstance(prices, list) or len(times) != len(prices):
-        raise ValueError("پاسخ API فاقد آرایه‌های معتبر زمان و قیمت است.")
+        raise ValueError("API response has invalid timestamp or price arrays.")
 
-    # جدول سادهٔ دو ستون زمان یونیکس و قیمت را می‌سازیم.
+    # Build a two-column table.
     df = pd.DataFrame({"unix_seconds": times, "price_eur_mwh": prices})
-    # اطمینان از عددی‌بودن قیمت‌ها؛ مقادیر خراب به NaN تبدیل می‌شوند.
+    # Convert invalid prices to NaN for validation.
     df["price_eur_mwh"] = pd.to_numeric(df["price_eur_mwh"], errors="coerce")
-    # یونیکس برحسب ثانیه است و ابتدا به زمان جهانی تبدیل می‌شود.
+    # Convert Unix seconds to UTC.
     df["timestamp_utc"] = pd.to_datetime(df["unix_seconds"], unit="s", utc=True)
-    # زمان محلی برلین را هم برای بررسی روز تحویل اضافه می‌کنیم.
+    # Add Berlin timestamps for delivery-day validation.
     df["timestamp_berlin"] = df["timestamp_utc"].dt.tz_convert(TIMEZONE)
 
-    # تنها در صورت کامل‌بودن تمام روزها داده را برمی‌گردانیم.
+    # Return data only after validation.
     return validate_prices(df, start, end)
 
 
 def main():
-    """تاریخ‌ها را می‌خواند، دانلود می‌کند و CSV قابل بازتولید می‌سازد."""
+    """Read CLI dates, download prices and write reproducible CSV."""
 
-    # پارامترهای قابل‌تغییر اجرا را تعریف می‌کنیم.
-    parser = argparse.ArgumentParser(description="دریافت قیمت ۱۵دقیقه‌ای Day-Ahead بازار DE-LU")
-    parser.add_argument("--start", default="2026-10-01", help="تاریخ شروع YYYY-MM-DD")
-    parser.add_argument("--end", default="2026-10-31", help="تاریخ پایان YYYY-MM-DD")
-    parser.add_argument("--output", default="prices_DE-LU.csv", help="نام فایل CSV")
-    # آرگومان‌هایی که کاربر وارد کرده خوانده می‌شوند.
+    # Define configurable CLI parameters.
+    parser = argparse.ArgumentParser(description="Download DE-LU 15-minute day-ahead prices")
+    parser.add_argument("--start", default="2026-10-01", help="Start date YYYY-MM-DD")
+    parser.add_argument("--end", default="2026-10-31", help="End date YYYY-MM-DD")
+    parser.add_argument("--output", default="prices_DE-LU.csv", help="CSV output filename")
+    # Parse user arguments.
     args = parser.parse_args()
 
-    # دریافت و کنترل داده انجام می‌شود؛ در خطا فایل ساخته نمی‌شود.
+    # Validate before writing files.
     df = fetch_prices(args.start, args.end)
-    # پوشهٔ مقصد را فقط پس از تأیید داده‌ها می‌سازیم.
+    # Create the destination directory after validation.
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-    # زمان‌های UTC/برلین و قیمت را با حفظ قیمت‌های منفی ذخیره می‌کنیم.
+    # Preserve negative prices and UTC/Berlin timestamps.
     df[["timestamp_utc", "timestamp_berlin", "price_eur_mwh"]].to_csv(
         args.output, index=False
     )
-    # تعداد بازه‌های معتبر را به کاربر گزارش می‌کنیم.
-    print(f"{len(df)} بازهٔ معتبر ذخیره شد: {args.output}")
-    # برای رعایت مجوز منبع، نام منبع را نمایش می‌دهیم.
-    print("منبع: Energy-Charts.info / Bundesnetzagentur (CC BY 4.0)")
+    # Report the number of validated intervals.
+    print(f"{len(df)} validated intervals saved: {args.output}")
+    # Display the source for attribution.
+    print("Source: Energy-Charts.info / Bundesnetzagentur (CC BY 4.0)")
 
 
-# این بخش فقط وقتی فایل مستقیماً اجرا شود فعال می‌شود.
+# Execute only when invoked directly.
 if __name__ == "__main__":
     main()
