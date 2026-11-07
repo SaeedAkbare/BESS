@@ -43,6 +43,25 @@ class HistoryExtensionTests(unittest.TestCase):
             fetcher=fake_fetch)
         self.assertEqual(len(result), 31 * 96 + 4 + 30 * 96)
 
+    def test_rejects_gaps_in_existing_history(self):
+        base = pd.read_csv(self.path)
+        base.drop(index=100).to_csv(self.path, index=False)
+        with self.assertRaisesRegex(ValueError, "missing intervals"):
+            extend_history(self.path, "2026-10", today=date(2026, 11, 7))
+
+    def test_rejects_missing_existing_price(self):
+        base = pd.read_csv(self.path)
+        base.loc[100, "price_eur_mwh"] = float("nan")
+        base.to_csv(self.path, index=False)
+        with self.assertRaisesRegex(ValueError, "Missing historical prices"):
+            extend_history(self.path, "2026-10", today=date(2026, 11, 7))
+
+    def test_rejects_truncated_existing_history(self):
+        base = pd.read_csv(self.path)
+        base.iloc[:-1].to_csv(self.path, index=False)
+        with self.assertRaisesRegex(ValueError, "end of a local day"):
+            extend_history(self.path, "2026-10", today=date(2026, 11, 7))
+
     def test_rejects_missing_intervals(self):
         def incomplete(start, end):
             return pd.DataFrame({
