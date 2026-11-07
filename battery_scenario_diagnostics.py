@@ -26,6 +26,8 @@ def scenario_diagnostics(daily_inputs):
             "intervals": len(actual),
             "band_10_90_coverage": float(inside.mean()),
             "mean_absolute_median_error_eur_mwh": float(np.abs(actual - middle).mean()),
+            "mean_signed_median_error_eur_mwh": float((actual - middle).mean()),
+            "mean_band_width_eur_mwh": float((upper - lower).mean()),
             "above_90_fraction": float((actual > upper).mean()),
             "below_10_fraction": float((actual < lower).mean()),
         })
@@ -36,6 +38,12 @@ def scenario_diagnostics(daily_inputs):
             row["band_10_90_coverage"] * row["intervals"] for row in days) / intervals,
         "mean_absolute_median_error_eur_mwh": sum(
             row["mean_absolute_median_error_eur_mwh"] * row["intervals"]
+            for row in days) / intervals,
+        "mean_signed_median_error_eur_mwh": sum(
+            row["mean_signed_median_error_eur_mwh"] * row["intervals"]
+            for row in days) / intervals,
+        "mean_band_width_eur_mwh": sum(
+            row["mean_band_width_eur_mwh"] * row["intervals"]
             for row in days) / intervals,
         "above_90_fraction": sum(
             row["above_90_fraction"] * row["intervals"] for row in days) / intervals,
