@@ -8,7 +8,8 @@ selected from strictly earlier months.
 """
 import argparse
 import json
-from datetime import date
+import math
+from datetime import date, timedelta
 from pathlib import Path
 
 from battery_october_benchmark import summarize
@@ -38,11 +39,19 @@ def evaluate_months(reports, *, lookback_months=None):
             for weight in (*WEIGHTS, "oracle"):
                 if weight not in row:
                     raise ValueError(f"Missing {weight} on {day}")
+                value = row[weight]
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                    raise ValueError(f"Non-finite or non-numeric {weight} on {day}")
         by_month[month] = report
 
     months = sorted(by_month)
     if len(months) < 2:
         raise ValueError("At least two months are required")
+    for i in range(1, len(months)):
+        previous = date.fromisoformat(months[i - 1] + "-01")
+        expected = (previous.replace(day=28) + timedelta(days=4)).replace(day=1)
+        if date.fromisoformat(months[i] + "-01") != expected:
+            raise ValueError("Monthly reports must be consecutive for walk-forward evaluation")
     alphas = {by_month[m]["alpha"] for m in months}
     if len(alphas) != 1:
         raise ValueError("All months must use the same CVaR alpha")
