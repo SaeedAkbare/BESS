@@ -11,7 +11,7 @@ from pathlib import Path
 from battery_monthly_scenarios import month_bounds, run
 from battery_walk_forward import evaluate_months
 from battery_optimization import Battery
-from battery_uncertainty import paired_profit_bootstrap
+from battery_uncertainty import paired_profit_bootstrap, month_block_profit_bootstrap
 
 
 def months_between(first, last):
@@ -60,6 +60,9 @@ def main():
         print(f"{month}: {len(report['daily'])} eligible days", flush=True)
     evaluation = evaluate_months(reports, lookback_months=args.lookback_months)
     evaluation["uncertainty"] = paired_profit_bootstrap(
+        [row for month in evaluation["monthly"] for row in month["daily"]],
+        seed=args.seed)
+    evaluation["month_block_uncertainty"] = month_block_profit_bootstrap(
         [row for month in evaluation["monthly"] for row in month["daily"]],
         seed=args.seed)
     (output / "walk_forward.json").write_text(
