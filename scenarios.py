@@ -186,7 +186,7 @@ def september_diagnostic(table, residuals, fixed_gap, past_scores):
     errors = past_scores.copy()
     count_inside, total, scenarios_inside, n_days = 0, 0, 0, 0
     # نسبت خطای واقعی به پهنای ۱۰–۹۰٪ سناریوها را برای تنظیم ماه بعد نگه می‌داریم.
-    risk_ratios = []
+    positive_ratios, negative_ratios = [], []
     for day, one_day in valid.groupby("day", sort=True):
         if len(one_day) != 96:
             continue
@@ -218,7 +218,8 @@ def september_diagnostic(table, residuals, fixed_gap, past_scores):
         ratios_day = np.where(actual_day >= mid,
                               (actual_day - mid) / positive_width,
                               (mid - actual_day) / negative_width)
-        risk_ratios.extend(ratios_day)
+        positive_ratios.extend(ratios_day[actual_day >= mid])
+        negative_ratios.extend(ratios_day[actual_day < mid])
         total += len(one_day)
         n_days += 1
 
@@ -236,9 +237,10 @@ def september_diagnostic(table, residuals, fixed_gap, past_scores):
     sep = errors[(errors["day"] >= first) & (errors["day"] < last)]
     gap_october = score_quantile(sep["score"].to_numpy())
     # فقط پس از پایان سپتامبر، یک ضریب پهنا برای کل سناریوهای اکتبر تعیین می‌کنیم.
-    scenario_factor = max(1.0, score_quantile(np.array(risk_ratios)))
+    positive_factor = max(1.0, score_quantile(np.array(positive_ratios)))
+    negative_factor = max(1.0, score_quantile(np.array(negative_ratios)))
     return (before, after, count_inside / total, scenarios_inside / total,
-            n_days, gap_october, scenario_factor)
+            n_days, gap_october, positive_factor, negative_factor)
 
 
 def sample_scenarios(median, lower, upper, historical_days, seed=42, count=50):
@@ -258,7 +260,7 @@ def sample_scenarios(median, lower, upper, historical_days, seed=42, count=50):
     return median + selected * spreads
 
 
-def evaluate_october(table, models, residuals, gap, factor):
+def evaluate_october(table, models, residuals, gap, positive_factor, negative_factor):
     """آزمون نهایی اکتبر: قیمت واقعی فقط پس از ساخت سناریو خوانده می‌شود."""
 
     october = table[(table["day"] >= date(2026, 10, 1)) &
@@ -273,7 +275,7 @@ def evaluate_october(table, models, residuals, gap, factor):
         # از قیمت روز برای تولید مسیرها استفاده نشده است.
         paths = sample_scenarios(median, low, high, residuals,
                                  seed=42 + n_days)
-        paths = median + factor * (paths - median)
+        paths = median + np.where(paths >= median, positive_factor, negative_factor) * (paths - median)
         p10, p90 = np.quantile(paths, [0.1, 0.9], axis=0)
         actual = rows["price_eur_mwh"].to_numpy()
         in_band += int(((actual >= low) & (actual <= high)).sum())
@@ -308,7 +310,7 @@ def main():
 
     # کالیبراسیون مقدماتی با فوریه تا اوت؛ سپتامبر ماه توسعه است.
     residuals, gap, raw_calib, fixed_calib, past_scores = past_residual_days(train)
-    raw_sep, fixed_sep, rolling_sep, scenario_sep, sep_days, october_gap, factor = (
+    raw_sep, fixed_sep, rolling_sep, scenario_sep, sep_days, october_gap, positive_factor, negative_factor = (
         september_diagnostic(train, residuals, gap, past_scores)
     )
 
@@ -316,14 +318,14 @@ def main():
     models = fit_quantiles(train)
     # معیارهای اکتبر فقط یک بار، بعد از قفل‌کردن ضریب‌ها، گزارش می‌شوند.
     october_band, october_paths, october_days = evaluate_october(
-        table, models, residuals, october_gap, factor
+        table, models, residuals, october_gap, positive_factor, negative_factor
     )
     lower, middle, upper = predict(models, test)
     # حاشیهٔ نهایی فقط از خطاهای سپتامبر ۲۰۲۶ تعیین شده است.
     lower, upper = lower - october_gap, upper + october_gap
     scenarios = sample_scenarios(middle, lower, upper, residuals)
     # ضریبِ فقط-سپتامبر، پراکندگی همهٔ مسیرها را حول پیش‌بینی مرکزی افزایش می‌دهد.
-    scenarios = middle + factor * (scenarios - middle)
+    scenarios = middle + np.where(scenarios >= middle, positive_factor, negative_factor) * (scenarios - middle)
     p10, p90 = np.quantile(scenarios, [0.1, 0.9], axis=0)
 
     # این فایل فقط پیش‌بینی و سناریوست؛ قیمت واقعی روز هدف در آن نیست.
@@ -347,7 +349,7 @@ def main():
           f"{raw_sep:.3f} / {fixed_sep:.3f} / {rolling_sep:.3f}")
     print(f"پوشش صدک ۱۰–۹۰٪ سناریوهای غلتان سپتامبر: {scenario_sep:.3f}")
     print(f"حاشیهٔ صرفاً گذشته برای شروع اکتبر: {october_gap:.2f} یورو/MWh")
-    print(f"ضریب پهنای مسیرها (تنظیم فقط روی سپتامبر): {factor:.3f}")
+    print(f"ضرایب سمت مثبت/منفی (فقط سپتامبر): {positive_factor:.3f} / {negative_factor:.3f}")
     print(f"آزمون دست‌نخوردهٔ اکتبر ({october_days} روز عادی)، "
           f"پوشش بازه/صدک سناریوها: {october_band:.3f} / {october_paths:.3f}")
     print("هشدار: سپتامبر ماه توسعه است؛ ۲۵ اکتبر ۱۰۰بازه‌ای در آزمون سناریو حذف شده.")
