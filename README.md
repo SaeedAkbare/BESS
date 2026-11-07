@@ -64,6 +64,16 @@ The end-to-end monthly scenario and optimization pipeline was executed on **30 e
 
 See [the documented October experiment](ROLLING_OCTOBER_RESULTS.md) and [the successful end-to-end GitHub Actions run](https://github.com/SaeedAkbare/BESS/actions/runs/42409185906).
 
+## October 2026 evaluation charts
+
+The following charts visualize the documented October experiment for an illustrative 2 MWh / 1 MW battery. They use the aggregate figures in [ROLLING_OCTOBER_RESULTS.md](ROLLING_OCTOBER_RESULTS.md), not newly generated dispatch or price time series.
+
+![Simulated gross arbitrage profit by CVaR risk weight](docs/figures/october_profit.svg)
+
+![Empirical CVaR of daily loss by risk weight](docs/figures/october_cvar.svg)
+
+**Reading the charts:** Results cover 30 eligible October 2026 days. They are exploratory simulated gross profits and empirical downside-risk estimates, not verified trading revenues. The 30-day CVaR estimates are unstable; selecting the best lambda from October outcomes would introduce hindsight bias. The perfect-foresight oracle is excluded from these policy-comparison charts because it is not a feasible trading strategy.
+
 ## Reproduce the project
 
 Requires Python and the dependencies in `requirements.txt`, including Pyomo and the HiGHS solver.
