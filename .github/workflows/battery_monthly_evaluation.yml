@@ -13,6 +13,9 @@ on:
       - feature/battery-optimization-foundation
     paths:
       - battery_monthly_scenarios.py
+      - battery_scenario_diagnostics.py
+      - scenarios.py
+      - battery_optimization.py
       - battery_walk_forward.py
       - .github/workflows/battery_monthly_evaluation.yml
 
