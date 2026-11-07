@@ -19,6 +19,9 @@ class WalkForwardTests(unittest.TestCase):
         feb = report("2026-02", {"2.0": 100.0, "1.0": 3.0})
         first = evaluate_months([feb, jan])
         self.assertEqual(first["monthly"][0]["selected_lambda"], 1.0)
+        self.assertEqual(first["monthly"][0]["selection_months"], ["2026-01"])
+        self.assertEqual(first["monthly"][0]["selection_cutoff_exclusive"], "2026-02-01")
+        self.assertEqual(first["monthly"][0]["selection_observation_count"], 1)
         feb["daily"][0]["2.0"] = 1000000.0
         second = evaluate_months([jan, feb])
         self.assertEqual(second["monthly"][0]["selected_lambda"], 1.0)
@@ -31,6 +34,8 @@ class WalkForwardTests(unittest.TestCase):
         self.assertEqual([x["selected_lambda"] for x in result["monthly"]],
                          [1.0, 2.0])
         self.assertEqual(result["evaluated_months"], 2)
+        self.assertEqual(result["monthly"][1]["selection_months"], ["2026-02"])
+        self.assertEqual(result["monthly"][1]["selection_cutoff_exclusive"], "2026-03-01")
 
     def test_rejects_duplicate_month(self):
         with self.assertRaises(ValueError):
