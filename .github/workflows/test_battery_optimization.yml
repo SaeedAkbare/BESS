@@ -21,6 +21,8 @@ on:
       - test_extend_price_history.py
       - run_battery_walk_forward.py
       - test_run_battery_walk_forward.py
+      - battery_uncertainty.py
+      - test_battery_uncertainty.py
       - .github/workflows/test_battery_optimization.yml
   workflow_dispatch:
 
@@ -35,4 +37,4 @@ jobs:
       - name: Install MILP dependencies
         run: python -m pip install numpy pandas pyomo highspy scikit-learn requests
       - name: Run solver-backed and chronological holdout tests
-        run: python -m unittest -v test_battery_optimization test_battery_comparison test_battery_physics_audit test_battery_chronological_holdout test_battery_walk_forward test_battery_monthly_scenarios test_extend_price_history test_run_battery_walk_forward
+        run: python -m unittest -v test_battery_optimization test_battery_comparison test_battery_physics_audit test_battery_chronological_holdout test_battery_walk_forward test_battery_monthly_scenarios test_extend_price_history test_run_battery_walk_forward test_battery_uncertainty
