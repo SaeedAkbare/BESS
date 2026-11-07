@@ -35,7 +35,7 @@ def extend_history(existing_csv, last_month, *, today=None, fetcher=fetch_prices
     if next_day.day != 1:
         raise ValueError("Historical CSV does not end on a full local calendar month")
     first_new = next_day
-    if first_new > start:
+    if first_new > end:
         raise ValueError("Requested last month precedes existing history")
     parts = [base]
     cursor = first_new
