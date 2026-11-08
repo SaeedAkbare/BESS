@@ -109,16 +109,27 @@ The battery optimization workflow was also [successfully run on the `main` branc
 
 The [walk-forward protocol](docs/WALK_FORWARD_PROTOCOL.md) specifies monthly model cutoffs, prior-month risk-weight selection, data checks, and uncertainty reporting. Run it only when **at least two complete, validated evaluation months** are available. The November 2026 month must be complete before it can be included. No multi-month out-of-sample result is claimed at present.
 
+## Repository layout
+
+Core implementation lives in `src/`, unit and compatibility tests in `tests/`, command-line utilities in `scripts/`, and research notes and figures in `docs/`. Root-level Python files remain as backward-compatible import and command-line entry points so existing commands and GitHub Actions continue to work.
+
+```text
+src/       Battery models, scenario generation, and data validation
+tests/     Unit, integration, and layout compatibility tests
+scripts/   Command-line tools and workflow runners
+docs/      Research methods, experiment results, and figures
+```
+
 ## Key files
 
 | File | Purpose |
 | --- | --- |
-| `scenarios.py` | Electricity-price scenario modeling |
-| `battery_optimization.py` | Battery MILP and CVaR formulation |
-| `battery_monthly_scenarios.py` | End-to-end monthly scenario generation and dispatch evaluation |
-| `battery_walk_forward.py` | Prior-month risk-weight selection and walk-forward metrics |
-| `run_battery_walk_forward.py` | Multi-month evaluation orchestration |
-| `extend_price_history.py` | Historical data extension and validation |
+| `src/scenarios.py` | Electricity-price scenario modeling |
+| `src/battery_optimization.py` | Battery MILP and CVaR formulation |
+| `src/battery_monthly_scenarios.py` | End-to-end monthly scenario generation and dispatch evaluation |
+| `src/battery_walk_forward.py` | Prior-month risk-weight selection and walk-forward metrics |
+| `scripts/run_battery_walk_forward.py` | Multi-month evaluation orchestration |
+| `src/extend_price_history.py` | Historical data extension and validation |
 | `docs/ROLLING_OCTOBER_RESULTS.md` | Documented October 2026 numerical results |
 | `docs/WALK_FORWARD_PROTOCOL.md` | Prospective evaluation protocol |
 | `.github/workflows/` | Continuous integration and evaluation workflows |
