@@ -99,8 +99,8 @@ For a detailed execution guide, see [SINGLE_MONTH_DEMO.md](docs/SINGLE_MONTH_DEM
 ### Run automated tests
 
 ```bash
-python -m unittest discover -p "test_battery*.py"
-python -m unittest test_extend_price_history.py test_run_battery_walk_forward.py
+python -m unittest discover -s tests -t . -p "test_battery*.py"
+python -m unittest tests.test_extend_price_history tests.test_run_battery_walk_forward
 ```
 
 The battery optimization workflow was also [successfully run on the `main` branch](https://github.com/SaeedAkbare/BESS/actions/runs/42421196816). Automated test success does not establish predictive accuracy or commercial feasibility.
