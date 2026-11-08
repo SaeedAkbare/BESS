@@ -8,7 +8,7 @@ on:
     paths:
       - ".github/workflows/check_prices.yml"
       - "data.py"
-      - "test_data.py"
+      - "tests/test_data.py"
       - "requirements.txt"
 
 # Read-only access; never commit downloaded data to main automatically.
@@ -35,7 +35,7 @@ jobs:
 
       # Test timestamps and missing data without network access.
       - name: Run tests
-        run: python -m unittest -v test_data
+        run: python -m unittest -v tests.test_data
 
       # Fetch one real day including Berlin's autumn daylight-saving transition.
       - name: Fetch one real day

@@ -33,7 +33,7 @@ jobs:
 
       # Test DST handling and data validation before downloading.
       - name: Test validation
-        run: python -m unittest -v test_data
+        run: python -m unittest -v tests.test_data
 
       # Download month by month; stop on any incomplete month.
       - name: Fetch historical prices

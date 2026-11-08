@@ -6,7 +6,7 @@ on:
     paths:
       - ".github/workflows/audit_risk.yml"
       - "risk_audit.py"
-      - "test_risk_audit.py"
+      - "tests/test_risk_audit.py"
   workflow_dispatch:
 
 # Allow read-only access to source code and existing historical artifacts.
@@ -34,7 +34,7 @@ jobs:
 
       # Run unit tests before using real data.
       - name: Run tests
-        run: python -m unittest -v test_data test_scenarios test_risk_audit
+        run: python -m unittest -v tests.test_data tests.test_scenarios tests.test_risk_audit
 
       # Reuse 13 months of validated real prices from an earlier Actions run.
       - name: Download historical price CSV
