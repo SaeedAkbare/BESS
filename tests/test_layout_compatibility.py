@@ -1,4 +1,6 @@
 """Regression checks for legacy import paths after the layout refactor."""
+import subprocess
+import sys
 import unittest
 import numpy as np
 
@@ -9,6 +11,25 @@ from src import battery_optimization, battery_uncertainty, scenarios
 
 
 class LayoutCompatibilityTests(unittest.TestCase):
+    def test_legacy_and_package_cli_help_match(self):
+        """CLI entry points must remain usable after moving implementation files."""
+        for legacy, package in (
+            ("scenarios.py", "src.scenarios"),
+            ("extend_price_history.py", "src.extend_price_history"),
+            ("run_battery_walk_forward.py", "scripts.run_battery_walk_forward"),
+        ):
+            with self.subTest(command=legacy):
+                old = subprocess.run(
+                    [sys.executable, legacy, "--help"],
+                    capture_output=True, text=True, check=True,
+                )
+                new = subprocess.run(
+                    [sys.executable, "-m", package, "--help"],
+                    capture_output=True, text=True, check=True,
+                )
+                self.assertEqual(old.stdout, new.stdout)
+                self.assertIn("usage:", old.stdout)
+
     def test_battery_api_is_same_implementation(self):
         self.assertIs(legacy_battery.Battery, battery_optimization.Battery)
         self.assertIs(legacy_battery.build_model, battery_optimization.build_model)
