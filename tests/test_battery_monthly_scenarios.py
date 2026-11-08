@@ -41,9 +41,9 @@ class MonthlyScenarioTests(unittest.TestCase):
                     np.full(len(rows), 2.0))
         def fake_residuals(rows):
             return np.zeros((60, 96)), 0.0, 0.0, 0.0, None
-        with patch("battery_monthly_scenarios.fit_quantiles", fake_fit), \
-             patch("battery_monthly_scenarios.predict", fake_predict), \
-             patch("battery_monthly_scenarios.past_residual_days", fake_residuals):
+        with patch("src.battery_monthly_scenarios.fit_quantiles", fake_fit), \
+             patch("src.battery_monthly_scenarios.predict", fake_predict), \
+             patch("src.battery_monthly_scenarios.past_residual_days", fake_residuals):
             result, meta = build_month(table, "2026-10")
         self.assertEqual(len(result), 1)
         self.assertEqual(len(seen_training), 2)
@@ -64,11 +64,11 @@ class MonthlyScenarioTests(unittest.TestCase):
         }
         battery = Battery(2, 1, .95, .95, 1)
         with patch("scenarios.prepare", return_value=pd.DataFrame()), \
-             patch("battery_monthly_scenarios.prepare", return_value=pd.DataFrame()), \
-             patch("battery_monthly_scenarios.build_month",
+             patch("src.battery_monthly_scenarios.prepare", return_value=pd.DataFrame()), \
+             patch("src.battery_monthly_scenarios.build_month",
                    return_value=([("2026-10-01", scenarios, actual)],
                                  {"month": "2026-10", "skipped_days": []})), \
-             patch("battery_monthly_scenarios.scenario_diagnostics",
+             patch("src.battery_monthly_scenarios.scenario_diagnostics",
                    return_value={}), \
              patch("battery_optimization.stochastic",
                    return_value=fake_schedule), \
