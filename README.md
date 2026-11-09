@@ -144,3 +144,7 @@ docs/      Research methods, experiment results, and figures
 - Expand visual reporting with price scenarios, dispatch profiles, state of charge, and risk-return comparisons.
 
 **Scope:** This repository demonstrates research and engineering methods. It does not provide investment advice, guaranteed returns, or a production trading system.
+
+## License
+
+This project's original source code is licensed under the [Apache License, Version 2.0](LICENSE). Third-party data and services retain their own terms and licenses.
