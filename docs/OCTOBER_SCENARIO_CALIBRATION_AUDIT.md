@@ -3,7 +3,6 @@
 **Status:** Diagnostic, development-period evaluation; not an untouched holdout.
 
 **Source:** GitHub Actions run
-[42413936338](https://github.com/SaeedAkbare/BESS/actions/runs/42413936338),
 artifact `monthly-battery-evaluation` (ID `13590239085`), commit
 `a2e9cf617aba036d23417666562a5ae544a79202`.
 The artifact includes `monthly_2026-10.json`.
