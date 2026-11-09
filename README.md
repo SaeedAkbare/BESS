@@ -62,7 +62,6 @@ The end-to-end monthly scenario and optimization pipeline was executed on **30 e
 
 **Interpretation:** These are *simulated gross arbitrage results* for the illustrative battery, not realized revenues. Choosing the best risk weight after inspecting October outcomes would bias any claim of independent October performance. CVaR estimated from only 30 daily observations is particularly unstable. The oracle is not operationally achievable.
 
-See [the documented October experiment](docs/ROLLING_OCTOBER_RESULTS.md) and [the successful end-to-end GitHub Actions run](https://github.com/SaeedAkbare/BESS/actions/runs/42409185906).
 
 ## October 2026 evaluation charts
 
@@ -103,7 +102,6 @@ python -m unittest discover -s tests -t . -p "test_battery*.py"
 python -m unittest tests.test_extend_price_history tests.test_run_battery_walk_forward
 ```
 
-The battery optimization workflow was also [successfully run on the `main` branch](https://github.com/SaeedAkbare/BESS/actions/runs/42421196816). Automated test success does not establish predictive accuracy or commercial feasibility.
 
 ### Future multi-month evaluation
 
