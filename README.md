@@ -91,20 +91,20 @@ The optimization in [`src/battery_optimization.py`](src/battery_optimization.py)
 
 For every $t\in\mathcal T$:
 
-$
+$$
 \begin{aligned}
 0 &\le p_t^c \le \bar P u_t, \\
 0 &\le p_t^d \le \bar P(1-u_t), \\
 e_{t+1} &= e_t + \Delta t\left(\eta_c p_t^c-\frac{p_t^d}{\eta_d}\right), \\
 0 &\le e_t \le \bar E, \qquad u_t\in\{0,1\}.
 \end{aligned}
-$
+$$
 
 The energy bound also applies at $t=N$. Boundary conditions are
 
-$
+$$
 e_0=E^{\mathrm{init}},\qquad e_N=E^{\mathrm{term}}.
-$
+$$
 
 The binary mode prevents simultaneous charging and discharging. A single set of $p_t^c,p_t^d,u_t,e_t$ variables is shared across **all** price scenarios: there are no scenario-indexed dispatch variables or post-realization decisions. The model omits ramp limits, degradation, network limits, and market fees unless approximated by the single variable-cost input.
 
@@ -112,7 +112,7 @@ The binary mode prevents simultaneous charging and discharging. A single set of 
 
 Let $\hat\pi_t$ be the price trajectory known to the optimizer. For the `deterministic(scenarios, battery)` entry point, $\hat\pi_t=\bar\pi_t$ is the arithmetic mean of the supplied scenario prices. For `perfect_foresight(realized_prices, battery)`, the same deterministic MILP is solved **ex post** with realized prices as an unattainable oracle.
 
-$
+$$
 \boxed{
 \max_{p^c,p^d,u,e}\;
 \sum_{t\in\mathcal T}\Delta t
@@ -121,7 +121,7 @@ $
 -c^{\mathrm{var}}(p_t^c+p_t^d)
 \right]
 }
-$
+$$
 
 Subject to **all shared physical constraints** above. Price and cost are in EUR/MWh and power times hours gives MWh, so the objective is in EUR. The deterministic wrapper uses a single trajectory and no CVaR term by default; it is **not** a claim that the future price is known.
 
@@ -129,7 +129,7 @@ Subject to **all shared physical constraints** above. Price and cost are in EUR/
 
 For each $s\in\mathcal S$, scenario profit and loss are
 
-$
+$$
 \Pi_s =
 \sum_{t\in\mathcal T}\Delta t
 \left[
@@ -137,22 +137,22 @@ $
 -c^{\mathrm{var}}(p_t^c+p_t^d)
 \right],
 \qquad L_s=-\Pi_s.
-$
+$$
 
 The expected profit is $\mathbb E[\Pi]=\sum_s w_s\Pi_s$. CVaR of **loss** is represented by the Rockafellar–Uryasev linearization:
 
-$
+$$
 \begin{aligned}
 \operatorname{CVaR}_{\alpha}(L)
 &=\zeta+\frac{1}{1-\alpha}\sum_{s\in\mathcal S}w_s\xi_s,\\
 \xi_s&\ge -\Pi_s-\zeta,\quad
 \xi_s\ge0 \qquad (s\in\mathcal S).
 \end{aligned}
-$
+$$
 
 The implemented risk-aware MILP is
 
-$
+$$
 \boxed{
 \max_{p^c,p^d,u,e,\zeta,\xi}
 \left\{
@@ -162,13 +162,13 @@ $
 \right)
 \right\}
 }
-$
+$$
 
 subject to the **shared physical constraints** and CVaR excess-loss constraints above, with $\lambda>0$. Because $\zeta$ and $\xi_s$ enter a maximization objective with a negative CVaR coefficient, the model minimizes the tail-loss expression as part of optimizing dispatch. At $\lambda=0$, the code **omits** the CVaR auxiliary variables and maximizes expected profit alone:
 
-$
+$$
 \max_{p^c,p^d,u,e}\;\sum_{s\in\mathcal S}w_s\Pi_s.
-$
+$$
 
 This risk-neutral objective is equivalent to a deterministic optimization using the **probability-weighted** mean price $\sum_s w_s\pi_{s,t}$. It coincides with the `deterministic()` arithmetic-mean wrapper when probabilities are uniform. For $\lambda>0$, the model remains a MILP: the battery dynamics and profit expressions are linear, CVaR is linearized, and $u_t$ is binary.
 
