@@ -4,28 +4,15 @@ on:
   push:
     branches:
       - feature/battery-optimization-foundation
+      - refactor/project-layout
   pull_request:
     paths:
-      - battery_optimization.py
-      - test_battery_optimization.py
-      - test_battery_comparison.py
-      - test_battery_physics_audit.py
-      - battery_comparison.py
-      - battery_chronological_holdout.py
-      - test_battery_chronological_holdout.py
-      - battery_walk_forward.py
-      - test_battery_walk_forward.py
-      - battery_monthly_scenarios.py
-      - test_battery_monthly_scenarios.py
-      - extend_price_history.py
-      - test_extend_price_history.py
-      - run_battery_walk_forward.py
-      - test_run_battery_walk_forward.py
-      - battery_uncertainty.py
-      - test_battery_uncertainty.py
-      - battery_scenario_diagnostics.py
-      - test_battery_scenario_diagnostics.py
-      - .github/workflows/test_battery_optimization.yml
+      - 'src/**'
+      - 'scripts/**'
+      - 'tests/**'
+      - '*.py'
+      - 'requirements.txt'
+      - '.github/workflows/**'
   workflow_dispatch:
 
 jobs:
@@ -37,6 +24,6 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install MILP dependencies
-        run: python -m pip install numpy pandas pyomo highspy scikit-learn requests
-      - name: Run solver-backed and chronological holdout tests
-        run: python -m unittest -v test_battery_optimization test_battery_comparison test_battery_physics_audit test_battery_chronological_holdout test_battery_walk_forward test_battery_monthly_scenarios test_extend_price_history test_run_battery_walk_forward test_battery_uncertainty test_battery_scenario_diagnostics
+        run: python -m pip install -r requirements.txt
+      - name: Run full test suite
+        run: python -m unittest discover -s tests -t . -v

@@ -42,7 +42,7 @@ annualized financial claims should account for the exclusions.
 ## Execution
 
 After the last day of November 2026, open the GitHub Actions workflow
-[`Multi-month walk-forward battery backtest`](.github/workflows/battery_walk_forward.yml)
+[`Multi-month walk-forward battery backtest`](../.github/workflows/battery_walk_forward.yml)
 and run it with `through_month=2026-11`. The workflow downloads the
 original validated history artifact, fetches and validates complete
 new months, executes the sequential monthly evaluations, and uploads

@@ -62,11 +62,11 @@ The end-to-end monthly scenario and optimization pipeline was executed on **30 e
 
 **Interpretation:** These are *simulated gross arbitrage results* for the illustrative battery, not realized revenues. Choosing the best risk weight after inspecting October outcomes would bias any claim of independent October performance. CVaR estimated from only 30 daily observations is particularly unstable. The oracle is not operationally achievable.
 
-See [the documented October experiment](ROLLING_OCTOBER_RESULTS.md) and [the successful end-to-end GitHub Actions run](https://github.com/SaeedAkbare/BESS/actions/runs/42409185906).
+See [the documented October experiment](docs/ROLLING_OCTOBER_RESULTS.md) and [the successful end-to-end GitHub Actions run](https://github.com/SaeedAkbare/BESS/actions/runs/42409185906).
 
 ## October 2026 evaluation charts
 
-The following charts visualize the documented October experiment for an illustrative 2 MWh / 1 MW battery. They use the aggregate figures in [ROLLING_OCTOBER_RESULTS.md](ROLLING_OCTOBER_RESULTS.md), not newly generated dispatch or price time series.
+The following charts visualize the documented October experiment for an illustrative 2 MWh / 1 MW battery. They use the aggregate figures in [ROLLING_OCTOBER_RESULTS.md](docs/ROLLING_OCTOBER_RESULTS.md), not newly generated dispatch or price time series.
 
 ![Simulated gross arbitrage profit by CVaR risk weight](docs/figures/october_profit.svg)
 
@@ -94,33 +94,44 @@ python battery_monthly_scenarios.py \
 
 Replace `output/extended_prices.csv` with the actual path to the validated dataset. The command generates scenario diagnostics, dispatch schedules, per-day outcomes, and aggregate risk/profit results in JSON.
 
-For a detailed execution guide, see [SINGLE_MONTH_DEMO.md](SINGLE_MONTH_DEMO.md).
+For a detailed execution guide, see [SINGLE_MONTH_DEMO.md](docs/SINGLE_MONTH_DEMO.md).
 
 ### Run automated tests
 
 ```bash
-python -m unittest discover -p "test_battery*.py"
-python -m unittest test_extend_price_history.py test_run_battery_walk_forward.py
+python -m unittest discover -s tests -t . -p "test_battery*.py"
+python -m unittest tests.test_extend_price_history tests.test_run_battery_walk_forward
 ```
 
 The battery optimization workflow was also [successfully run on the `main` branch](https://github.com/SaeedAkbare/BESS/actions/runs/42421196816). Automated test success does not establish predictive accuracy or commercial feasibility.
 
 ### Future multi-month evaluation
 
-The [walk-forward protocol](WALK_FORWARD_PROTOCOL.md) specifies monthly model cutoffs, prior-month risk-weight selection, data checks, and uncertainty reporting. Run it only when **at least two complete, validated evaluation months** are available. The November 2026 month must be complete before it can be included. No multi-month out-of-sample result is claimed at present.
+The [walk-forward protocol](docs/WALK_FORWARD_PROTOCOL.md) specifies monthly model cutoffs, prior-month risk-weight selection, data checks, and uncertainty reporting. Run it only when **at least two complete, validated evaluation months** are available. The November 2026 month must be complete before it can be included. No multi-month out-of-sample result is claimed at present.
+
+## Repository layout
+
+Core implementation lives in `src/`, unit and compatibility tests in `tests/`, command-line utilities in `scripts/`, and research notes and figures in `docs/`. Root-level Python files remain as backward-compatible import and command-line entry points so existing commands and GitHub Actions continue to work.
+
+```text
+src/       Battery models, scenario generation, and data validation
+tests/     Unit, integration, and layout compatibility tests
+scripts/   Command-line tools and workflow runners
+docs/      Research methods, experiment results, and figures
+```
 
 ## Key files
 
 | File | Purpose |
 | --- | --- |
-| `scenarios.py` | Electricity-price scenario modeling |
-| `battery_optimization.py` | Battery MILP and CVaR formulation |
-| `battery_monthly_scenarios.py` | End-to-end monthly scenario generation and dispatch evaluation |
-| `battery_walk_forward.py` | Prior-month risk-weight selection and walk-forward metrics |
-| `run_battery_walk_forward.py` | Multi-month evaluation orchestration |
-| `extend_price_history.py` | Historical data extension and validation |
-| `ROLLING_OCTOBER_RESULTS.md` | Documented October 2026 numerical results |
-| `WALK_FORWARD_PROTOCOL.md` | Prospective evaluation protocol |
+| `src/scenarios.py` | Electricity-price scenario modeling |
+| `src/battery_optimization.py` | Battery MILP and CVaR formulation |
+| `src/battery_monthly_scenarios.py` | End-to-end monthly scenario generation and dispatch evaluation |
+| `src/battery_walk_forward.py` | Prior-month risk-weight selection and walk-forward metrics |
+| `scripts/run_battery_walk_forward.py` | Multi-month evaluation orchestration |
+| `src/extend_price_history.py` | Historical data extension and validation |
+| `docs/ROLLING_OCTOBER_RESULTS.md` | Documented October 2026 numerical results |
+| `docs/WALK_FORWARD_PROTOCOL.md` | Prospective evaluation protocol |
 | `.github/workflows/` | Continuous integration and evaluation workflows |
 
 ## Portfolio skills demonstrated

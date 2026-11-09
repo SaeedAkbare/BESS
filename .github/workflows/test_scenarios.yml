@@ -7,7 +7,7 @@ on:
     paths:
       - ".github/workflows/test_scenarios.yml"
       - "scenarios.py"
-      - "test_scenarios.py"
+      - "tests/test_scenarios.py"
   workflow_dispatch:
 
 # Read access to Actions is required to retrieve prior artifacts.
@@ -35,7 +35,7 @@ jobs:
 
       # Test daily path preservation, leakage prevention and DST handling.
       - name: Run unit tests
-        run: python -m unittest -v test_data test_scenarios
+        run: python -m unittest -v tests.test_data tests.test_scenarios
 
       # Retrieve the previously validated 13-month historical price artifact.
       - name: Download validated historical data
