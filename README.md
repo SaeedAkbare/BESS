@@ -55,64 +55,64 @@ The optimization in [`src/battery_optimization.py`](src/battery_optimization.py)
 
 | Symbol | Definition |
 | --- | --- |
-| $\mathcal{T}=\{0,\ldots,N-1\}$, $t$ | Dispatch intervals; the default is 96 quarter-hour intervals on a regular delivery day. |
-| $\mathcal{E}=\{0,\ldots,N\}$ | Energy-state boundaries, including the initial and final states. |
-| $\mathcal{S}=\{1,\ldots,K\}$, $s$ | Finite electricity-price scenarios; the deterministic case has one price trajectory. |
+| $`\mathcal{T}=\{0,\ldots,N-1\}`$, $`t`$ | Dispatch intervals; the default is 96 quarter-hour intervals on a regular delivery day. |
+| $`\mathcal{E}=\{0,\ldots,N\}`$ | Energy-state boundaries, including the initial and final states. |
+| $`\mathcal{S}=\{1,\ldots,K\}`$, $`s`$ | Finite electricity-price scenarios; the deterministic case has one price trajectory. |
 
 ### Parameters
 
 | Symbol | Units | Meaning / implementation |
 | --- | --- | --- |
-| $\Delta t$ | h | Interval duration; default $0.25$. |
-| $\bar P$ | MW | Common maximum charging and discharging power (`power_mw`). |
-| $\bar E$ | MWh | Maximum stored energy (`capacity_mwh`); minimum is zero. |
-| $\eta_c,\eta_d$ | dimensionless | Charging and discharging efficiencies in $(0,1]$. |
-| $E^{\mathrm{init}}$ | MWh | Prescribed initial stored energy (`initial_mwh`). |
-| $E^{\mathrm{term}}$ | MWh | Prescribed final stored energy (`terminal_mwh`), defaulting to $E^{\mathrm{init}}$. |
-| $c^{\mathrm{var}}$ | EUR/MWh | Operating cost per MWh charged **plus** per MWh discharged (`variable_cost_eur_mwh`). |
-| $\pi_{s,t}$ | EUR/MWh | Electricity price at interval $t$ in scenario $s$. |
-| $w_s$ | dimensionless | Scenario probability: $w_s\ge 0$, $\sum_s w_s=1$; uniform $1/K$ by default. |
-| $\bar\pi_t$ | EUR/MWh | Mean scenario price used by the `deterministic()` wrapper: $K^{-1}\sum_s\pi_{s,t}$, **unweighted** even if scenario probabilities are separately supplied. |
-| $\alpha$ | dimensionless | CVaR confidence level, $0<\alpha<1$, default $0.95$. |
-| $\lambda$ | dimensionless | Nonnegative weight on CVaR of **loss**, default $0$ in `build_model()`; `stochastic()` defaults to $1$. |
+| $`\Delta t`$ | h | Interval duration; default $`0.25`$. |
+| $`\bar P`$ | MW | Common maximum charging and discharging power (`power_mw`). |
+| $`\bar E`$ | MWh | Maximum stored energy (`capacity_mwh`); minimum is zero. |
+| $`\eta_c,\eta_d`$ | dimensionless | Charging and discharging efficiencies in $`(0,1]`$. |
+| $`E^{\mathrm{init}}`$ | MWh | Prescribed initial stored energy (`initial_mwh`). |
+| $`E^{\mathrm{term}}`$ | MWh | Prescribed final stored energy (`terminal_mwh`), defaulting to $`E^{\mathrm{init}}`$. |
+| $`c^{\mathrm{var}}`$ | EUR/MWh | Operating cost per MWh charged **plus** per MWh discharged (`variable_cost_eur_mwh`). |
+| $`\pi_{s,t}`$ | EUR/MWh | Electricity price at interval $`t`$ in scenario $`s`$. |
+| $`w_s`$ | dimensionless | Scenario probability: $`w_s\ge 0`$, $`\sum_s w_s=1`$; uniform $`1/K`$ by default. |
+| $`\bar\pi_t`$ | EUR/MWh | Mean scenario price used by the `deterministic()` wrapper: $`K^{-1}\sum_s\pi_{s,t}`$, **unweighted** even if scenario probabilities are separately supplied. |
+| $`\alpha`$ | dimensionless | CVaR confidence level, $`0<\alpha<1`$, default $`0.95`$. |
+| $`\lambda`$ | dimensionless | Nonnegative weight on CVaR of **loss**, default $`0`$ in `build_model()`; `stochastic()` defaults to $`1`$. |
 
 ### Decision variables
 
 | Symbol | Domain | Meaning |
 | --- | --- | --- |
-| $p_t^c$ | $[0,\bar P]$ MW | Charging power at time $t$. |
-| $p_t^d$ | $[0,\bar P]$ MW | Discharging power at time $t$. |
-| $u_t$ | $\{0,1\}$ | Operating-mode indicator: 1 permits charging; 0 permits discharging. |
-| $e_t$ | $[0,\bar E]$ MWh | Stored energy at boundary $t$, for $t\in\mathcal E$. |
-| $\zeta$ | EUR, unrestricted | Auxiliary VaR threshold for scenario **loss**, created only when $\lambda>0$. |
-| $\xi_s$ | EUR, nonnegative | CVaR excess loss for scenario $s$, created only when $\lambda>0$. |
+| $`p_t^c`$ | $`[0,\bar P]`$ MW | Charging power at time $`t`$. |
+| $`p_t^d`$ | $`[0,\bar P]`$ MW | Discharging power at time $`t`$. |
+| $`u_t`$ | $`\{0,1\}`$ | Operating-mode indicator: 1 permits charging; 0 permits discharging. |
+| $`e_t`$ | $`[0,\bar E]`$ MWh | Stored energy at boundary $`t`$, for $`t\in\mathcal E`$. |
+| $`\zeta`$ | EUR, unrestricted | Auxiliary VaR threshold for scenario **loss**, created only when $`\lambda>0`$. |
+| $`\xi_s`$ | EUR, nonnegative | CVaR excess loss for scenario $`s`$, created only when $`\lambda>0`$. |
 
 ### Shared physical MILP constraints
 
-For every $t\in\mathcal T$:
+For every $`t\in\mathcal T`$:
 
-$$
+```math
 \begin{aligned}
 0 &\le p_t^c \le \bar P u_t, \\
 0 &\le p_t^d \le \bar P(1-u_t), \\
 e_{t+1} &= e_t + \Delta t\left(\eta_c p_t^c-\frac{p_t^d}{\eta_d}\right), \\
 0 &\le e_t \le \bar E, \qquad u_t\in\{0,1\}.
 \end{aligned}
-$$
+```
 
-The energy bound also applies at $t=N$. Boundary conditions are
+The energy bound also applies at $`t=N`$. Boundary conditions are
 
-$$
+```math
 e_0=E^{\mathrm{init}},\qquad e_N=E^{\mathrm{term}}.
-$$
+```
 
-The binary mode prevents simultaneous charging and discharging. A single set of $p_t^c,p_t^d,u_t,e_t$ variables is shared across **all** price scenarios: there are no scenario-indexed dispatch variables or post-realization decisions. The model omits ramp limits, degradation, network limits, and market fees unless approximated by the single variable-cost input.
+The binary mode prevents simultaneous charging and discharging. A single set of $`p_t^c,p_t^d,u_t,e_t`$ variables is shared across **all** price scenarios: there are no scenario-indexed dispatch variables or post-realization decisions. The model omits ramp limits, degradation, network limits, and market fees unless approximated by the single variable-cost input.
 
 ### 1. Deterministic MILP (one forecast price path)
 
-Let $\hat\pi_t$ be the price trajectory known to the optimizer. For the `deterministic(scenarios, battery)` entry point, $\hat\pi_t=\bar\pi_t$ is the arithmetic mean of the supplied scenario prices. For `perfect_foresight(realized_prices, battery)`, the same deterministic MILP is solved **ex post** with realized prices as an unattainable oracle.
+Let $`\hat\pi_t`$ be the price trajectory known to the optimizer. For the `deterministic(scenarios, battery)` entry point, $`\hat\pi_t=\bar\pi_t`$ is the arithmetic mean of the supplied scenario prices. For `perfect_foresight(realized_prices, battery)`, the same deterministic MILP is solved **ex post** with realized prices as an unattainable oracle.
 
-$$
+```math
 \boxed{
 \max_{p^c,p^d,u,e}\;
 \sum_{t\in\mathcal T}\Delta t
@@ -121,15 +121,15 @@ $$
 -c^{\mathrm{var}}(p_t^c+p_t^d)
 \right]
 }
-$$
+```
 
 Subject to **all shared physical constraints** above. Price and cost are in EUR/MWh and power times hours gives MWh, so the objective is in EUR. The deterministic wrapper uses a single trajectory and no CVaR term by default; it is **not** a claim that the future price is known.
 
 ### 2. Stochastic risk-aware MILP (fixed schedule across scenarios)
 
-For each $s\in\mathcal S$, scenario profit and loss are
+For each $`s\in\mathcal S`$, scenario profit and loss are
 
-$$
+```math
 \Pi_s =
 \sum_{t\in\mathcal T}\Delta t
 \left[
@@ -137,22 +137,22 @@ $$
 -c^{\mathrm{var}}(p_t^c+p_t^d)
 \right],
 \qquad L_s=-\Pi_s.
-$$
+```
 
-The expected profit is $\mathbb E[\Pi]=\sum_s w_s\Pi_s$. CVaR of **loss** is represented by the Rockafellar–Uryasev linearization:
+The expected profit is $`\mathbb E[\Pi]=\sum_s w_s\Pi_s`$. CVaR of **loss** is represented by the Rockafellar–Uryasev linearization:
 
-$$
+```math
 \begin{aligned}
 \operatorname{CVaR}_{\alpha}(L)
 &=\zeta+\frac{1}{1-\alpha}\sum_{s\in\mathcal S}w_s\xi_s,\\
 \xi_s&\ge -\Pi_s-\zeta,\quad
 \xi_s\ge0 \qquad (s\in\mathcal S).
 \end{aligned}
-$$
+```
 
 The implemented risk-aware MILP is
 
-$$
+```math
 \boxed{
 \max_{p^c,p^d,u,e,\zeta,\xi}
 \left\{
@@ -162,22 +162,22 @@ $$
 \right)
 \right\}
 }
-$$
+```
 
-subject to the **shared physical constraints** and CVaR excess-loss constraints above, with $\lambda>0$. Because $\zeta$ and $\xi_s$ enter a maximization objective with a negative CVaR coefficient, the model minimizes the tail-loss expression as part of optimizing dispatch. At $\lambda=0$, the code **omits** the CVaR auxiliary variables and maximizes expected profit alone:
+subject to the **shared physical constraints** and CVaR excess-loss constraints above, with $`\lambda>0`$. Because $`\zeta`$ and $`\xi_s`$ enter a maximization objective with a negative CVaR coefficient, the model minimizes the tail-loss expression as part of optimizing dispatch. At $`\lambda=0`$, the code **omits** the CVaR auxiliary variables and maximizes expected profit alone:
 
-$$
+```math
 \max_{p^c,p^d,u,e}\;\sum_{s\in\mathcal S}w_s\Pi_s.
-$$
+```
 
-This risk-neutral objective is equivalent to a deterministic optimization using the **probability-weighted** mean price $\sum_s w_s\pi_{s,t}$. It coincides with the `deterministic()` arithmetic-mean wrapper when probabilities are uniform. For $\lambda>0$, the model remains a MILP: the battery dynamics and profit expressions are linear, CVaR is linearized, and $u_t$ is binary.
+This risk-neutral objective is equivalent to a deterministic optimization using the **probability-weighted** mean price $`\sum_s w_s\pi_{s,t}`$. It coincides with the `deterministic()` arithmetic-mean wrapper when probabilities are uniform. For $`\lambda>0`$, the model remains a MILP: the battery dynamics and profit expressions are linear, CVaR is linearized, and $`u_t`$ is binary.
 
 ### Implementation correspondence and interpretation
 
 - `build_model()` creates `m.T`, `m.E`, `m.S`, `m.charge`, `m.discharge`, `m.mode`, `m.energy`, `m.profit`, `m.expected_profit`, and (only for positive risk weight) `m.var_loss`, `m.excess_loss`, `m.tail`, and `m.cvar_loss`.
 - `deterministic()` optimizes a mean price path; `stochastic()` optimizes one **common** schedule against all scenario paths; `perfect_foresight()` is a hindsight reference, not a day-ahead strategy.
 - The reported CVaR objective is a **scenario-distribution tail-loss penalty on one day's profit**. The separate empirical CVaR of **daily realized losses** in the October results is an evaluation statistic, not the optimization variable itself.
-- Typical demonstration settings: $N=96$, $K=50$, $\Delta t=0.25$ h, $\alpha=0.95$, and $\lambda\in\{0,0.25,0.5,1,2\}$. The number of intervals/scenarios is determined by the supplied price array, not hard-coded in the MILP.
+- Typical demonstration settings: $`N=96`$, $`K=50`$, $`\Delta t=0.25`$ h, $`\alpha=0.95`$, and $`\lambda\in\{0,0.25,0.5,1,2\}`$. The number of intervals/scenarios is determined by the supplied price array, not hard-coded in the MILP.
 
 
 ## Historical results — October 2026
