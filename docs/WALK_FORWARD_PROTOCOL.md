@@ -85,7 +85,6 @@ unseen during design and tuning.
 
 The battery is illustrative (2 MWh capacity, 1 MW power, 95% charge
 and discharge efficiency, 1 MWh initial/terminal energy, zero variable
-O&M). These are **not verified Bollingstedt asset specifications**.
 Daily terminal SOC equals initial SOC; interday energy carryover,
 degradation, market fees, imbalance risk, availability, and network
 constraints are not fully modeled. Perfect foresight is an unattainable
