@@ -143,7 +143,7 @@ The expected profit is $`\mathbb E[\Pi]=\sum_s w_s\Pi_s`$. CVaR of **loss** is r
 
 ```math
 \begin{aligned}
-\operatorname{CVaR}_{\alpha}(L)
+\mathrm{CVaR}_{\alpha}(L)
 &=\zeta+\frac{1}{1-\alpha}\sum_{s\in\mathcal S}w_s\xi_s,\\
 \xi_s&\ge -\Pi_s-\zeta,\quad
 \xi_s\ge0 \qquad (s\in\mathcal S).
