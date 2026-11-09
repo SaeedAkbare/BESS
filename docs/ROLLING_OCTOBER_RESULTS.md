@@ -4,7 +4,6 @@ This report records the first successful end-to-end execution of
 `battery_monthly_scenarios.py`. It is **not** a multi-month walk-forward
 validation and must not be treated as independent model selection evidence.
 
-- GitHub Actions run: https://github.com/SaeedAkbare/BESS/actions/runs/42409185906
 - Artifact: `monthly-battery-evaluation` / `monthly_2026-10.json`
 - Source: validated DE-LU historical price artifact from run 42305243042
 - Evaluated days: 30; 2026-10-25 (100 intervals, DST) excluded
