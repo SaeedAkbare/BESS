@@ -1,0 +1,30 @@
+name: Scan full Git history for secrets
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/scan_git_history.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks-history:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout complete Git history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Download pinned Gitleaks binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz -o /tmp/gitleaks.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz gitleaks
+          chmod +x gitleaks
+      - name: Scan all Git history
+        shell: bash
+        run: |
+          ./gitleaks git --no-banner --redact --exit-code 1 --log-opts="--all" .
