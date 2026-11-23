@@ -4,6 +4,49 @@ A reproducible Python research and portfolio project for **day-ahead battery ene
 
 > **Status:** Research demonstration with automated tests and a completed October 2026 historical simulation. This is **not** a verified live trading system or a claim of commercial profitability. October 2026 was used during development and is **not** an untouched out-of-sample holdout.
 
+## Commercial backtesting upgrade
+
+The framework now asks whether battery arbitrage remains attractive after
+explicit costs, whether CVaR dispatch improves realized downside performance,
+and whether those conclusions survive chronological evaluation and sensitivity
+analysis. It preserves the original MILP, scenario method and October evidence.
+
+- Separate purchase/sale fees, execution costs, legacy variable O&M and linear
+  degradation per grid-side MWh discharged enter **every** optimization and
+  historical evaluation with matching definitions. Defaults remain zero.
+- Daily component reconciliation, throughput, net profit per discharged MWh,
+  exact-tail empirical VaR/CVaR, negative-day frequency and drawdown accompany
+  zero dispatch, risk-neutral, CVaR and unattainable oracle comparisons.
+- Complete-month and quarter-hour checks reject missing or uncompleted history.
+  Risk-weight selection can use earlier total profit or earlier mean net profit
+  minus a prespecified downside penalty; target months never select themselves.
+- JSON sensitivity configurations re-optimize dispatch for economic, efficiency,
+  scenario-count and uncertainty assumptions. One-at-a-time experiments and
+  joint stresses are labeled separately. Reports include observed volatility
+  strata with thresholds calculated from earlier data.
+- HTML reports and SVG charts are built from executed outputs, with input hashes,
+  versions, seeds, exclusions and sample-size limitations. No source publication
+  vintages are verified, so chronological simulation is not proof of auction
+  tradability. No completed November 2026 result is claimed.
+
+See [commercial methodology](docs/COMMERCIAL_METHODOLOGY.md),
+[repository audit](docs/COMMERCIAL_AUDIT.md) and
+[technical change log](docs/COMMERCIAL_CHANGELOG.md).
+
+```bash
+python -m pip install -r requirements.txt
+python -m unittest discover -s tests -t . -v
+python -m scripts.run_commercial_backtest --history input/prices.csv --config config/zero_cost.json --output-dir output/zero_cost
+python -m scripts.run_commercial_backtest --history input/prices.csv --config config/commercial.example.json --output-dir output/commercial
+```
+
+Both commands default to October 2026, a **development** evaluation. Supply a
+complete validated source CSV including earlier training history. The example
+commercial values are illustrative assumptions, not actual tariffs or verified
+asset costs. With only one month, the displayed risk-aware policy is prespecified
+lambda=1; prior-month-selected evaluation remains pending. Existing output
+directories containing results are protected from overwrite.
+
 ## Project at a glance
 
 | Component | Implementation |
@@ -45,7 +88,7 @@ The example system is **illustrative**, not a verified physical asset:
 | Initial and terminal state of charge | 1 MWh |
 | Variable operating cost | 0 EUR/MWh (simplification) |
 
-The optimization enforces a cyclic daily state of charge rather than interday carryover. Degradation, market fees, imbalance costs, asset availability, and network constraints are not fully represented.
+The optimization enforces a cyclic daily state of charge rather than interday carryover. Configurable fees and linear discharge degradation are now represented. Imbalance costs, availability, network constraints and nonlinear aging remain outside the model.
 
 ## Mathematical formulations
 
@@ -70,6 +113,8 @@ The optimization in [`src/battery_optimization.py`](src/battery_optimization.py)
 | $`E^{\mathrm{init}}`$ | MWh | Prescribed initial stored energy (`initial_mwh`). |
 | $`E^{\mathrm{term}}`$ | MWh | Prescribed final stored energy (`terminal_mwh`), defaulting to $`E^{\mathrm{init}}`$. |
 | $`c^{\mathrm{var}}`$ | EUR/MWh | Operating cost per MWh charged **plus** per MWh discharged (`variable_cost_eur_mwh`). |
+| $`c^c`$ | EUR/MWh charged | Legacy variable O&M + purchase fee + execution cost. |
+| $`c^d`$ | EUR/MWh discharged | Legacy variable O&M + sale fee + execution cost + discharge degradation. |
 | $`\pi_{s,t}`$ | EUR/MWh | Electricity price at interval $`t`$ in scenario $`s`$. |
 | $`w_s`$ | dimensionless | Scenario probability: $`w_s\ge 0`$, $`\sum_s w_s=1`$; uniform $`1/K`$ by default. |
 | $`\bar\pi_t`$ | EUR/MWh | Mean scenario price used by the `deterministic()` wrapper: $`K^{-1}\sum_s\pi_{s,t}`$, **unweighted** even if scenario probabilities are separately supplied. |
@@ -106,7 +151,7 @@ The energy bound also applies at $`t=N`$. Boundary conditions are
 e_0=E^{\mathrm{init}},\qquad e_N=E^{\mathrm{term}}.
 ```
 
-The binary mode prevents simultaneous charging and discharging. A single set of $`p_t^c,p_t^d,u_t,e_t`$ variables is shared across **all** price scenarios: there are no scenario-indexed dispatch variables or post-realization decisions. The model omits ramp limits, degradation, network limits, and market fees unless approximated by the single variable-cost input.
+The binary mode prevents simultaneous charging and discharging. A single set of $`p_t^c,p_t^d,u_t,e_t`$ variables is shared across **all** price scenarios: there are no scenario-indexed dispatch variables or post-realization decisions. The model includes explicit linear commercial costs; ramp limits, nonlinear aging and network limits remain omitted.
 
 ### 1. Deterministic MILP (one forecast price path)
 
@@ -118,7 +163,7 @@ Let $`\hat\pi_t`$ be the price trajectory known to the optimizer. For the `deter
 \sum_{t\in\mathcal T}\Delta t
 \left[
 \hat\pi_t(p_t^d-p_t^c)
--c^{\mathrm{var}}(p_t^c+p_t^d)
+-c^c p_t^c-c^d p_t^d
 \right]
 }
 ```
@@ -134,7 +179,7 @@ For each $`s\in\mathcal S`$, scenario profit and loss are
 \sum_{t\in\mathcal T}\Delta t
 \left[
 \pi_{s,t}(p_t^d-p_t^c)
--c^{\mathrm{var}}(p_t^c+p_t^d)
+-c^c p_t^c-c^d p_t^d
 \right],
 \qquad L_s=-\Pi_s.
 ```
@@ -180,7 +225,33 @@ This risk-neutral objective is equivalent to a deterministic optimization using 
 - Typical demonstration settings: $`N=96`$, $`K=50`$, $`\Delta t=0.25`$ h, $`\alpha=0.95`$, and $`\lambda\in\{0,0.25,0.5,1,2\}`$. The number of intervals/scenarios is determined by the supplied price array, not hard-coded in the MILP.
 
 
-## Historical results — October 2026
+## Executed commercial rerun — October 2026 development data
+
+The upgrade was executed on the original price artifact for 30 eligible days,
+with 11 illustrative commercial configurations. The base case uses purchase
+and sale fees of 1 EUR/MWh each, execution cost of 0.5 EUR/MWh on each side,
+discharge degradation of 10 EUR/MWh, and zero legacy O&M.
+
+| Strategy | Simulated net P&L EUR | Empirical 95% loss CVaR EUR |
+| --- | ---: | ---: |
+| Zero dispatch | 0.00 | 0.00 |
+| Risk-neutral | 4,787.02 | 38.90 |
+| CVaR, prespecified lambda=1 | 4,956.47 | 24.88 |
+| Unattainable oracle | 8,741.97 | -75.50 |
+
+These new risk statistics use exact fractional-tail CVaR. The paired iid-day
+95% interval for the mean lambda=1 minus risk-neutral net-P&L difference was
+**[-0.27, 12.28] EUR/day**, which includes zero and ignores serial dependence.
+The joint cost/efficiency stress yielded losses for both policies; prohibitive
+degradation costs led to zero dispatch on all 30 days. No general profitability
+or risk-aware superiority is established.
+
+**Validation:** 88 automated tests passed. Independent checks reconciled 2,310
+commercial and 210 zero-cost schedules against the source prices and physical
+constraints. Multi-month empirical selection remains pending; November is
+incomplete. See [executed results, charts and limitations](docs/COMMERCIAL_RESULTS.md).
+
+## Original historical results — October 2026 (preserved)
 
 The end-to-end monthly scenario and optimization pipeline was executed on **30 eligible delivery days**. October 25 (daylight-saving transition, 100 intervals) was excluded. September 2026 was used for scenario calibration.
 
@@ -273,7 +344,7 @@ docs/      Research methods, experiment results, and figures
 
 - Validate the workflow prospectively on additional complete months not used during development or tuning.
 - Quantify forecasting calibration, profit uncertainty, and robustness across changing market conditions.
-- Add site-specific battery constraints, degradation, trading fees, and operational costs before considering real-world deployment.
+- Verify site-specific constraints and the implemented cost assumptions before considering real-world deployment; extend linear degradation to cycle-depth/calendar aging only with defensible asset inputs.
 - Expand visual reporting with price scenarios, dispatch profiles, state of charge, and risk-return comparisons.
 
 **Scope:** This repository demonstrates research and engineering methods. It does not provide investment advice, guaranteed returns, or a production trading system.

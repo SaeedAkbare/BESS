@@ -66,7 +66,7 @@ def run(history_csv, battery, *, risk_weight=1.0, alpha=.95):
         record = {"day": str(day), "intervals": len(rows)}
         for name, schedule in results.items():
             record[name] = realized_profit(
-                schedule, actual, variable_cost=battery.variable_cost_eur_mwh)
+                schedule, actual, battery=battery)
         daily.append(record)
 
     if not daily:

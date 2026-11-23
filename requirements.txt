@@ -12,3 +12,6 @@ scikit-learn>=1.4,<2
 # Battery MILP formulation and HiGHS solver
 pyomo>=6.7,<7
 highspy>=1.7,<2
+
+# Reproducible static commercial-report charts
+matplotlib>=3.8,<4
