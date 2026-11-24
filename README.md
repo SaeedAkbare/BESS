@@ -47,6 +47,51 @@ asset costs. With only one month, the displayed risk-aware policy is prespecifie
 lambda=1; prior-month-selected evaluation remains pending. Existing output
 directories containing results are protected from overwrite.
 
+## Commercial results in pictures
+
+**October 2026 development simulation: 30 eligible days, not live revenues.**
+The figures below use the [executed results](docs/commercial_results/summary.json)
+from the original Energy-Charts / Bundesnetzagentur DE-LU history. Costs are
+illustrative; 25 October is excluded because of the DST transition.
+
+### From gross arbitrage to net profit
+
+![Gross-to-net cost reconciliation for risk-neutral and fixed-lambda CVaR dispatch](docs/commercial_results/gross_to_net.svg)
+
+Risk-aware dispatch earned slightly less gross arbitrage profit but traded less
+energy and incurred lower costs. Net P&L was **EUR 4,956.47**, compared with
+**EUR 4,787.02** for risk-neutral dispatch under the same assumptions.
+
+### Downside risk, trading activity and uncertainty
+
+![Drawdown, historical loss CVaR, discharged energy and bootstrap uncertainty](docs/commercial_results/risk_and_uncertainty.svg)
+
+The observed downside metrics were lower for fixed lambda=1, but the confidence
+interval for its mean profit advantage includes zero. **Superiority is not
+established.** The bootstrap ignores serial dependence and uses only 30 days.
+
+### How profit accumulated
+
+![Cumulative simulated net profit across October delivery days](docs/commercial_results/cumulative.svg)
+
+The oracle knows future prices and is an unattainable hindsight reference.
+See the [daily-profit and drawdown charts](docs/COMMERCIAL_RESULTS.md#realized-daily-risk)
+for individual loss days and peak-to-trough changes.
+
+### When the economics become unattractive
+
+![Re-optimized net profit under cost, efficiency and uncertainty assumptions](docs/commercial_results/sensitivity.svg)
+
+The joint cost/efficiency stress produced a loss; prohibitive degradation costs
+made zero dispatch optimal on all 30 days. The selector comparison remains
+pending because only one complete evaluation month is available.
+
+To regenerate the two summary figures from the committed numerical evidence:
+
+```bash
+python -m scripts.plot_commercial_summary
+```
+
 ## Project at a glance
 
 | Component | Implementation |

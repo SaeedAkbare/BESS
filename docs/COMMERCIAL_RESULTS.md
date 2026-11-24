@@ -26,6 +26,8 @@ Risk-aware comparison is prespecified lambda=1; all five candidate lambdas are r
 
 ## Gross-to-net reconciliation (EUR)
 
+![Gross-to-net reconciliation by policy](commercial_results/gross_to_net.svg)
+
 | Strategy | Gross | Trading fees | Degradation | Other variable | Net |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Idle | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
@@ -34,6 +36,8 @@ Risk-aware comparison is prespecified lambda=1; all five candidate lambdas are r
 | Unattainable oracle | 10257.57 | 242.74 | 1151.49 | 121.37 | 8741.97 |
 
 ## Realized daily risk
+
+![Downside risk, trading activity and bootstrap uncertainty](commercial_results/risk_and_uncertainty.svg)
 
 | Strategy | Mean EUR/day | Worst net loss EUR | Negative days | Max drawdown EUR | 95% loss CVaR EUR | Discharge MWh |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
