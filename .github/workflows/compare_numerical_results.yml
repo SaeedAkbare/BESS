@@ -89,6 +89,19 @@ jobs:
           old = run("original")
           new = run("refactored")
 
+          # The commercial extension adds one diagnostic without changing the
+          # legacy dispatch contract. Validate it independently, then compare
+          # every original field with the same strict numerical tolerance.
+          added = new["dispatch"].keys() - old["dispatch"].keys()
+          assert added <= {"scenario_cvar_loss_eur"}, added
+          if "scenario_cvar_loss_eur" in new["dispatch"]:
+              # Two equiprobable paths at alpha=.8: the loss tail is the worst path.
+              expected_cvar = -min(new["dispatch"]["scenario_profit_eur"])
+              assert np.isclose(new["dispatch"]["scenario_cvar_loss_eur"],
+                                expected_cvar, rtol=1e-8, atol=1e-8)
+          if "scenario_cvar_loss_eur" in added:
+              new["dispatch"].pop("scenario_cvar_loss_eur")
+
           def compare(a, b, path="result"):
               if isinstance(a, dict):
                   assert isinstance(b, dict) and a.keys() == b.keys(), path
