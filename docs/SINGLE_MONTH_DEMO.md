@@ -28,12 +28,12 @@ Replace `output/extended_prices.csv` with the actual location of your validated 
 
 The report includes `summary` (risk-weight results), `oracle` (unattainable perfect-foresight comparison), `scenario_diagnostics`, `skipped_days`, and `daily`. For each eligible day, `daily[i].dispatch[weight]` contains `charge_mw` and `discharge_mw` (96 quarter-hour intervals each) and `energy_mwh` (97 state-of-charge points, including initial and terminal states). For example, `daily[0].dispatch["1.0"]` is the risk-weight-1 schedule. `daily[i][weight]` remains realized profit in EUR. The oracle schedule is **not** an executable trading strategy.
 
-The illustrative battery has 2 MWh energy capacity, 1 MW power, 95% charging/discharging efficiency, and 1 MWh initial/terminal energy. These parameters are not verified site specifications. The model does not fully account for degradation, fees, imbalance costs, or network constraints.
+The illustrative battery has 2 MWh energy capacity, 1 MW power, 95% charging/discharging efficiency, and 1 MWh initial/terminal energy. These parameters are not verified site specifications. Defaults preserve zero costs. Add `--config config/commercial.example.json` to apply explicit illustrative fees, execution costs and linear discharge degradation; `commercial_summary` and daily `accounting` reconcile the resulting net P&L. Imbalance and network constraints remain omitted. See [commercial methodology](COMMERCIAL_METHODOLOGY.md) for the report CLI and the distinction between historical and new risk statistics.
 
 ## Tests
 
 ```bash
-python -m unittest test_battery_monthly_scenarios.py
+python -m unittest tests.test_battery_monthly_scenarios
 ```
 
 This test checks monthly boundaries, temporal isolation, and dispatch-report structure using mocked scenarios/solves. It is **not** a full live-history end-to-end integration test. Full integration verification with the validated history and solver remains a separate acceptance step.

@@ -23,7 +23,7 @@ FEATURES = ["sin_hour", "cos_hour", "sin_year", "cos_year",
 
 
 def prepare(csv_file):
-    """Convert validated price CSV to features available before the day-ahead auction."""
+    """Build chronological lagged features; source publication vintages are unverified."""
 
     # Parse UTC timestamps first to handle the repeated autumn clock hour.
     df = pd.read_csv(csv_file)
@@ -33,8 +33,13 @@ def prepare(csv_file):
         raise ValueError("Duplicate timestamps in the price file.")
 
     df["price_eur_mwh"] = pd.to_numeric(df["price_eur_mwh"], errors="coerce")
-    if df["price_eur_mwh"].isna().any():
+    if not np.isfinite(df["price_eur_mwh"]).all():
         raise ValueError("Missing or invalid prices.")
+    if df.empty or df["timestamp_utc"].isna().any():
+        raise ValueError("Empty history or missing timestamps")
+    from data import validate_prices
+    local_dates = df["timestamp_utc"].dt.tz_convert("Europe/Berlin").dt.date
+    validate_prices(df, local_dates.min(), local_dates.max())
 
     # Derive delivery dates and local hours in Europe/Berlin.
     local = df["timestamp_utc"].dt.tz_convert("Europe/Berlin")
@@ -47,7 +52,7 @@ def prepare(csv_file):
     df["cos_year"] = np.cos(2 * np.pi * year_day / 365.25)
     df["weekday"] = local.dt.dayofweek
 
-    # Previous-day price summaries are known before the current auction.
+    # Prior delivery-day prices only; pre-auction availability needs source vintages.
     daily = df.groupby("day")["price_eur_mwh"].agg(["mean", "min", "max"])
     previous = daily.shift(1)  # Never use prices from the target day.
     for feature, column in [("prev_mean", "mean"), ("prev_min", "min"),
@@ -288,7 +293,7 @@ def evaluate_october(table, models, residuals, gap, factor):
 def main():
     """Read history and save scenarios for one October 2026 day."""
 
-    parser = argparse.ArgumentParser(description="50 DE-LU price scenarios using sklearn")
+    parser = argparse.ArgumentParser(prog="scenarios.py", description="50 DE-LU price scenarios using sklearn")
     parser.add_argument("--input", required=True, help="Validated historical CSV")
     parser.add_argument("--date", default="2026-10-15", help="Evaluation day YYYY-MM-DD")
     parser.add_argument("--output", default="output/scenarios_2026-10-15.csv")

@@ -10,21 +10,22 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from battery_optimization import Battery, deterministic, stochastic, perfect_foresight
+from src.battery_economics import account_dispatch
 
 
-def realized_profit(schedule, actual, dt_hours=0.25, variable_cost=0):
-    charge = np.asarray(schedule["charge_mw"], dtype=float)
-    discharge = np.asarray(schedule["discharge_mw"], dtype=float)
-    actual = np.asarray(actual, dtype=float)
-    if actual.shape != charge.shape or charge.shape != discharge.shape:
-        raise ValueError("Realized prices and dispatch must have equal length")
-    return float(dt_hours * np.sum(actual * (discharge - charge)
-                   - variable_cost * (charge + discharge)))
+def realized_profit(schedule, actual, dt_hours=0.25, variable_cost=None, *, battery=None):
+    """Legacy scalar API; pass battery to apply all configured costs exactly once."""
+    if battery is not None and variable_cost is not None:
+        raise ValueError("Pass battery OR legacy variable_cost, not both")
+    if battery is None:
+        battery = Battery(1, 1, 1, 1, 0,
+                          variable_cost_eur_mwh=0 if variable_cost is None else variable_cost)
+    return account_dispatch(schedule, actual, battery, dt_hours=dt_hours)["net_profit_eur"]
 
 
 def evaluate(scenario_csv, history_csv, battery, *, risk_weight=1.0, alpha=.95):
     scenario_frame = pd.read_csv(scenario_csv)
-    columns = sorted(c for c in scenario_frame if c.startswith("scenario_"))
+    columns = sorted(c for c in scenario_frame if c.startswith("scenario_") and c[9:].isdigit())
     if not columns:
         raise ValueError("No scenario_XX columns found")
     scenarios = scenario_frame[columns].to_numpy(dtype=float).T
@@ -53,7 +54,8 @@ def evaluate(scenario_csv, history_csv, battery, *, risk_weight=1.0, alpha=.95):
     for name, schedule in results.items():
         summary[name] = {
             "realized_profit_eur": realized_profit(schedule, realized,
-                variable_cost=battery.variable_cost_eur_mwh),
+                battery=battery),
+            "accounting": account_dispatch(schedule, realized, battery),
             "expected_scenario_profit_eur": schedule["expected_profit_eur"],
             "charge_mw": schedule["charge_mw"],
             "discharge_mw": schedule["discharge_mw"],

@@ -1,8 +1,13 @@
 """Synthetic tests for chronological multi-month risk selection."""
 import unittest
 
-from battery_walk_forward import evaluate_months
+from battery_walk_forward import evaluate_months as evaluate_complete_months
 from battery_chronological_holdout import WEIGHTS
+
+
+def evaluate_months(reports, **kwargs):
+    # Minimal synthetic row fixtures test selection only, not month completeness.
+    return evaluate_complete_months(reports, require_complete=False, **kwargs)
 
 
 def report(month, profits=None, alpha=.95):

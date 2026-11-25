@@ -70,7 +70,7 @@ def extend_history(existing_csv, last_month, *, today=None, fetcher=fetch_prices
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(prog="extend_price_history.py", description=__doc__)
     parser.add_argument("--history", required=True)
     parser.add_argument("--through-month", required=True)
     parser.add_argument("--output", required=True)

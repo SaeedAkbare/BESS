@@ -45,10 +45,10 @@ def run(history_csv, battery, alpha=0.95):
         for weight in WEIGHTS:
             dispatch = stochastic(paths, battery, risk_weight=weight, alpha=alpha)
             row[str(weight)] = realized_profit(
-                dispatch, actual, variable_cost=battery.variable_cost_eur_mwh)
+                dispatch, actual, battery=battery)
         oracle = perfect_foresight(actual, battery)
         row["oracle"] = realized_profit(
-            oracle, actual, variable_cost=battery.variable_cost_eur_mwh)
+            oracle, actual, battery=battery)
         daily.append(row)
 
     if not daily:

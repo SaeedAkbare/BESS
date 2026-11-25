@@ -6,6 +6,7 @@ are verified. Install pyomo and highspy to solve.
 """
 from dataclasses import dataclass
 import numpy as np
+from src.battery_economics import COST_FIELDS, interval_net_profit
 
 
 @dataclass(frozen=True)
@@ -17,8 +18,17 @@ class Battery:
     initial_mwh: float
     terminal_mwh: float | None = None
     variable_cost_eur_mwh: float = 0.0
+    purchase_fee_eur_mwh: float = 0.0
+    sale_fee_eur_mwh: float = 0.0
+    execution_cost_eur_mwh: float = 0.0
+    degradation_eur_mwh_discharged: float = 0.0
 
     def validate(self):
+        for name, value in vars(self).items():
+            if value is None and name == "terminal_mwh":
+                continue
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not np.isfinite(value):
+                raise ValueError(f"{name} must be a finite number")
         if self.capacity_mwh <= 0 or self.power_mw <= 0:
             raise ValueError("Capacity and power must be positive")
         if not (0 < self.eta_charge <= 1 and 0 < self.eta_discharge <= 1):
@@ -26,8 +36,8 @@ class Battery:
         for value in (self.initial_mwh, self.terminal_mwh):
             if value is not None and not (0 <= value <= self.capacity_mwh):
                 raise ValueError("SOC energy must lie within capacity")
-        if self.variable_cost_eur_mwh < 0:
-            raise ValueError("Variable cost cannot be negative")
+        if any(getattr(self, name) < 0 for name in COST_FIELDS):
+            raise ValueError("Economic costs cannot be negative")
 
 
 def build_model(prices, battery: Battery, *, dt_hours=0.25,
@@ -49,7 +59,7 @@ def build_model(prices, battery: Battery, *, dt_hours=0.25,
     if p.ndim != 2 or not p.size or not np.isfinite(p).all():
         raise ValueError("Prices must be a nonempty finite 1D/2D array")
     ns, nt = p.shape
-    if dt_hours <= 0 or not (0 < alpha < 1) or risk_weight < 0:
+    if not np.isfinite([dt_hours, alpha, risk_weight]).all() or dt_hours <= 0 or not (0 < alpha < 1) or risk_weight < 0:
         raise ValueError("Invalid dt, alpha, or risk weight")
     w = np.full(ns, 1.0 / ns) if probabilities is None else np.asarray(probabilities, dtype=float)
     if w.shape != (ns,) or np.any(w < 0) or not np.isfinite(w).all() or not np.isclose(w.sum(), 1):
@@ -73,8 +83,7 @@ def build_model(prices, battery: Battery, *, dt_hours=0.25,
         (battery.eta_charge * m.charge[t] - m.discharge[t] / battery.eta_discharge))
 
     m.profit = Expression(m.S, rule=lambda m, s: sum(
-        dt_hours * (p[s, t] * (m.discharge[t] - m.charge[t])
-                    - battery.variable_cost_eur_mwh * (m.charge[t] + m.discharge[t]))
+        dt_hours * interval_net_profit(p[s, t], m.charge[t], m.discharge[t], battery)
         for t in m.T))
     m.expected_profit = Expression(expr=sum(float(w[s]) * m.profit[s] for s in m.S))
     if risk_weight:
@@ -96,9 +105,10 @@ def solve_dispatch(prices, battery: Battery, *, solver="appsi_highs", **kwargs):
     opt = SolverFactory(solver)
     if not opt.available(exception_flag=False):
         raise RuntimeError("Install a MILP solver (pip install highspy)")
-    result = opt.solve(m)
+    result = opt.solve(m, load_solutions=False)
     if result.solver.termination_condition != TerminationCondition.optimal:
         raise RuntimeError(f"Solver did not prove optimality: {result.solver.termination_condition}")
+    m.solutions.load_from(result)
     return {
         "charge_mw": [value(m.charge[t]) for t in m.T],
         "discharge_mw": [value(m.discharge[t]) for t in m.T],
@@ -106,6 +116,7 @@ def solve_dispatch(prices, battery: Battery, *, solver="appsi_highs", **kwargs):
         "scenario_profit_eur": [value(m.profit[s]) for s in m.S],
         "expected_profit_eur": value(m.expected_profit),
         "objective_eur": value(m.objective),
+        "scenario_cvar_loss_eur": value(m.cvar_loss) if hasattr(m, "cvar_loss") else None,
     }
 
 

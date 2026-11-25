@@ -2,11 +2,14 @@
 
 ## Scope and status
 
-The reproducible multi-month evaluation pipeline is implemented on
-`feature/battery-optimization-foundation`, but **multi-month empirical
-results are not yet available**. The validated reference price artifact
+The reproducible multi-month evaluation pipeline and commercial extension are
+implemented, but **multi-month empirical results are not yet available**. The validated reference price artifact
 covers October 2025 through October 2026. November 2026 is not a
-completed delivery month as of 2026-11-07.
+completed delivery month as of 2026-11-23.
+
+See [commercial methodology](COMMERCIAL_METHODOLOGY.md) for cost accounting,
+the configurable net/downside selector, sensitivity configuration and empirical
+risk conventions. The original October evidence remains unchanged.
 
 The October-only diagnostic is recorded in
 [`ROLLING_OCTOBER_RESULTS.md`](ROLLING_OCTOBER_RESULTS.md). October has
@@ -27,11 +30,11 @@ been used during model development, so it is **not an untouched holdout**.
 5. Generate the same 50 daily price scenarios for all five candidate
    risk weights (lambda 0, 0.25, 0.5, 1, 2). Evaluate realized
    profits using observed prices only after dispatch decisions.
-6. Use the first available evaluation month for risk-weight selection
-   only. For each later month, select lambda using maximum total
-   realized profit in strictly preceding evaluated months. Ties
-   favor the smaller lambda. Report risk-neutral and perfect-foresight
-   oracle comparisons.
+6. Use the first available evaluation month for risk-weight selection only.
+   For each later month, use a prespecified rule on strictly earlier months:
+   maximum total net profit (`profit`), or mean daily net profit minus a
+   configured penalty on positive empirical loss CVaR (`net_downside`).
+   Ties favor smaller lambda. Include idle, risk-neutral and oracle comparisons.
 7. Preserve month-specific selection cutoffs, selection months, and
    sample counts in the JSON report.
 
@@ -76,18 +79,20 @@ The report includes:
   Even three blocks provide fragile inference.
 
 Neither bootstrap interval should be presented as proof of superior
-out-of-sample performance. The selection rule itself maximizes
-historical realized profit, rather than a prespecified risk-return
-utility. A genuine prospective validation requires future months
-unseen during design and tuning.
+out-of-sample performance. Freeze the selection rule and penalty before target
+evaluation. A genuine prospective validation requires future months unseen
+during design and tuning. New commercial metrics use exact fractional-tail
+CVaR; the legacy October summaries retain their original threshold-tail mean.
 
 ## Physical and economic assumptions
 
 The battery is illustrative (2 MWh capacity, 1 MW power, 95% charge
-and discharge efficiency, 1 MWh initial/terminal energy, zero variable
-Daily terminal SOC equals initial SOC; interday energy carryover,
-degradation, market fees, imbalance risk, availability, and network
-constraints are not fully modeled. Perfect foresight is an unattainable
+and discharge efficiency, 1 MWh initial/terminal energy). Zero-cost defaults
+remain reproducible; configurable fees, linear discharge degradation, execution
+cost and legacy variable O&M now enter optimization and scoring consistently.
+Daily terminal SOC equals initial SOC; interday carryover, nonlinear aging,
+imbalance risk, availability and network constraints are not modeled. Historical
+source vintages do not establish pre-auction availability. Perfect foresight is an unattainable
 oracle upper bound, not an implementable trading strategy.
 
 ## Acceptance criteria for future results

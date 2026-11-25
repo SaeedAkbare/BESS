@@ -9,6 +9,7 @@ from pathlib import Path
 
 # Use pandas for tabular and timezone-aware data.
 import pandas as pd
+import numpy as np
 # Use requests for API calls.
 import requests
 
@@ -28,6 +29,8 @@ def validate_prices(df, start, end):
     # Reject missing timestamps or invalid prices.
     if df[["timestamp_utc", "price_eur_mwh"]].isna().any().any():
         raise ValueError("API response contains an invalid or missing price or timestamp.")
+    if not np.isfinite(pd.to_numeric(df["price_eur_mwh"], errors="coerce")).all():
+        raise ValueError("Prices must be finite numeric values")
 
     # Reject duplicate timestamps.
     if df["timestamp_utc"].duplicated().any():

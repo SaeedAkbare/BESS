@@ -25,12 +25,12 @@ class MonthlyScenarioTests(unittest.TestCase):
             build_month(pd.DataFrame(), "2026-09")
 
     def test_no_target_prices_in_model_or_calibration(self):
-        # Synthetic data: one day each for prior-month calibration and target.
-        times = pd.date_range("2026-09-30", periods=96, freq="15min", tz="UTC")
-        target = pd.date_range("2026-10-01", periods=96, freq="15min", tz="UTC")
+        # Complete local months including the 100-interval October DST day.
+        times = pd.date_range("2026-09-01", "2026-11-01", freq="15min",
+                              inclusive="left", tz="Europe/Berlin")
         table = pd.DataFrame({
-            "day": [date(2026, 9, 30)] * 96 + [date(2026, 10, 1)] * 96,
-            "price_eur_mwh": [10.0] * 96 + [999.0] * 96,
+            "day": times.date, "timestamp_utc": times.tz_convert("UTC"),
+            "price_eur_mwh": np.where(times.month == 9, 10., 999.),
         })
         seen_training = []
         def fake_fit(rows):
@@ -45,9 +45,9 @@ class MonthlyScenarioTests(unittest.TestCase):
              patch("src.battery_monthly_scenarios.predict", fake_predict), \
              patch("src.battery_monthly_scenarios.past_residual_days", fake_residuals):
             result, meta = build_month(table, "2026-10")
-        self.assertEqual(len(result), 1)
+        self.assertEqual(len(result), 30)
         self.assertEqual(len(seen_training), 2)
-        self.assertTrue(all(date(2026, 10, 1) not in days
+        self.assertTrue(all(all(d < date(2026, 10, 1) for d in days)
                             for days in seen_training))
         self.assertEqual(meta["model_training_before"], "2026-10-01")
 
